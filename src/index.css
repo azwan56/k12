@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  /* Custom Stitch Colors */
+  --color-navy-900: #0A192F;
+  --color-navy-800: #112240;
+  
+  --color-ivory: #F8F8F0;
+  --color-ivory-dark: #E8E8E0;
+
+  --color-teal-accent: #64FFDA;
+  --color-teal-deep: #0D9488;
+
+  /* Custom Blur */
+  --blur-xs: 2px;
+}
+
+@layer utilities {
+  .glass-card {
+    background: rgba(17, 34, 64, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(100, 255, 218, 0.1);
+  }
+  
+  .gradient-text {
+    background: linear-gradient(135deg, #64FFDA 0%, #0D9488 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .glass-panel {
+    @apply backdrop-blur-xl bg-white/5 border border-white/10 shadow-[0_8px_32px_0_#0000004d];
+  }
+
+  .glass-panel-light {
+    @apply backdrop-blur-xl bg-black/5 border border-black/10 shadow-[0_8px_32px_0_#1f268712];
+  }
+
+  .text-glow {
+    text-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: .7;
+  }
+}
