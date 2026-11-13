@@ -25,8 +25,7 @@ export default defineConfig(({mode}) => {
           manualChunks: {
             firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
             react: ['react', 'react-dom'],
-            three: ['three', '@react-three/fiber', '@react-three/drei'],
-            vendor: ['lucide-react', 'motion', '@google/genai']
+            vendor: ['lucide-react', 'motion']
           }
         }
       }

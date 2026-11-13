@@ -4,11 +4,10 @@ export type GradeLevel = 'G6' | 'G7';
 export interface PracticeQuestion {
   id: string;
   grade: GradeLevel;
-  subTrack?: string;
-  topic: string;
+  track?: string;
   question: string;
   options: string[];
-  correctIndex: number;
+  answer: number;
   explanation: string;
 }
 
@@ -16,8 +15,20 @@ export interface SubTrack {
   id: string;
   name: string;
   nameZh: string;
-  description: string;
+  emoji: string;
   topics: string[];
+}
+
+export interface Subject {
+  id: SubjectId;
+  name: string;
+  nameZh: string;
+  emoji: string;
+  /** One short line per grade. Keep it under ~20 characters. */
+  short: Record<GradeLevel, string>;
+  topics: Record<GradeLevel, string[]>;
+  tracks?: Partial<Record<GradeLevel, SubTrack[]>>;
+  questions: PracticeQuestion[];
 }
 
 export interface EssayPrompt {
@@ -26,449 +37,252 @@ export interface EssayPrompt {
   genre: string;
   title: string;
   prompt: string;
-  targetWords: [number, number];
+  words: [number, number];
   tips: string[];
 }
 
-export interface SubjectConfig {
-  id: SubjectId;
-  name: string;
-  nameZh: string;
-  tagline: string;
-  badge: string;
-  accentText: string;
-  accentBg: string;
-  accentBorder: string;
-  overview: Record<GradeLevel, string>;
-  topics: Record<GradeLevel, string[]>;
-  subTracks?: Partial<Record<GradeLevel, SubTrack[]>>;
-  externalUrl?: {
-    label: string;
-    url: string;
-  };
-  questions: PracticeQuestion[];
-}
+const q = (
+  id: string,
+  grade: GradeLevel,
+  track: string | undefined,
+  question: string,
+  options: string[],
+  answer: number,
+  explanation: string
+): PracticeQuestion => ({ id, grade, track, question, options, answer, explanation });
 
 export const ESSAY_PROMPTS: EssayPrompt[] = [
   {
     id: 'g6-narrative-1',
     grade: 'G6',
-    genre: 'Narrative / 记叙文',
+    genre: '记叙文',
     title: 'A Challenge I Overcame',
-    prompt:
-      'Write about a time when you faced a difficult task at school or in daily life. Describe what happened, how you felt, and what you learned from the experience.',
-    targetWords: [150, 250],
-    tips: [
-      'Hook: Start with a vivid moment or dialogue.',
-      'Body: Show your struggle and turning point with sensory details.',
-      'Conclusion: Reflect on how this moment helped you grow.'
-    ]
+    prompt: 'Write about a time you faced something hard. What happened, how did you feel, and what did you learn?',
+    words: [150, 250],
+    tips: ['Start with an exciting moment.', 'Show your feelings with details.', 'End with what you learned.']
   },
   {
     id: 'g6-persuasive-1',
     grade: 'G6',
-    genre: 'Persuasive / 议论文',
+    genre: '议论文',
     title: 'Should Schools Have Longer Breaks?',
-    prompt:
-      'Some students believe longer breaks between classes improve focus and health, while others worry it shortens learning time. State your opinion and support it with clear reasons.',
-    targetWords: [150, 250],
-    tips: [
-      'Thesis: State your clear position in the opening paragraph.',
-      'Reasons: Give 2–3 concrete examples or school observations.',
-      'Counterargument: Briefly address the opposing view.'
-    ]
+    prompt: 'Do longer breaks help students learn better? Give your opinion and 2–3 reasons.',
+    words: [150, 250],
+    tips: ['Say your opinion first.', 'Give clear reasons with examples.', 'Mention the other side briefly.']
   },
   {
     id: 'g7-argument-1',
     grade: 'G7',
-    genre: 'Argumentative / 思辨议论文',
-    title: 'AI Tools in Middle School Learning',
-    prompt:
-      'Artificial intelligence tools are increasingly used by Grade 7 students for research and writing. Should AI tutors be encouraged in daily homework, or should strict limits apply? Defend your stance.',
-    targetWords: [200, 320],
-    tips: [
-      'Claim: Define a nuanced thesis (e.g., guided use vs. over-reliance).',
-      'Evidence: Compare skill-building with shortcut risks.',
-      'Transitions: Use cohesive markers (However, Consequently, Furthermore).'
-    ]
+    genre: '议论文',
+    title: 'AI Tools for Homework',
+    prompt: 'Should students use AI tutors for homework, or should there be strict limits? Defend your view.',
+    words: [200, 320],
+    tips: ['Make a clear, balanced claim.', 'Compare benefits and risks.', 'Use linking words: However, Therefore.']
   },
   {
     id: 'g7-expository-1',
     grade: 'G7',
-    genre: 'Expository / 说明文',
-    title: 'Designing a Sustainable City',
-    prompt:
-      'Imagine you are designing an eco-friendly neighborhood for the year 2040. Explain three key systems (energy, transport, or green space) that would make it both livable and sustainable.',
-    targetWords: [200, 320],
-    tips: [
-      'Structure: Dedicate one clear paragraph to each system.',
-      'Precision: Use strong academic verbs and specific examples.',
-      'Conclusion: Summarize how the systems work together.'
-    ]
+    genre: '说明文',
+    title: 'My Green City in 2040',
+    prompt: 'Design an eco-friendly neighborhood. Explain three systems that make it great to live in.',
+    words: [200, 320],
+    tips: ['One paragraph per system.', 'Use specific examples.', 'Show how they work together.']
   }
 ];
 
-export const K12_SUBJECTS: SubjectConfig[] = [
+export const SUBJECTS: Subject[] = [
   {
     id: 'english',
     name: 'English',
-    nameZh: '英语语言与写作',
-    tagline: 'Wordsmith 造句训练 + 命题作文工作台',
-    badge: 'G6 / G7 Core',
-    accentText: 'text-indigo-400',
-    accentBg: 'bg-indigo-500/10',
-    accentBorder: 'border-indigo-500/30',
-    overview: {
-      G6: '六年级重点强化高阶词汇在语境中的精准造句（Wordsmith），并完成 150–250 词的记叙文与观点类命题作文训练。',
-      G7: '七年级聚焦学术词汇搭配、复杂句式构建（Wordsmith），以及 200–320 词的思辨议论文与说明文命题写作。'
-    },
+    nameZh: '英语',
+    emoji: '📚',
+    short: { G6: '造句 + 作文，一起变强', G7: '学术词汇 + 思辨写作' },
     topics: {
-      G6: ['Wordsmith 核心词汇造句', '记叙文细节描写', '观点类命题作文结构', '语法与时态一致性'],
-      G7: ['学术词汇与复杂句型', '思辨议论文立论与反驳', '说明文逻辑衔接', '同伴互评与自查润色']
-    },
-    externalUrl: {
-      label: '启动 Wordsmith 造句',
-      url: 'https://wordsmith.vanpower.live'
+      G6: ['词汇造句', '记叙文', '观点作文', '时态语法'],
+      G7: ['学术词汇', '议论文', '说明文', '复杂句型']
     },
     questions: [
-      {
-        id: 'eng-g6-1',
-        grade: 'G6',
-        topic: 'Vocabulary in Context',
-        question: 'Choose the sentence that uses the word "resilient" most accurately:',
-        options: [
-          'The resilient glass shattered the moment it touched the floor.',
-          'Although the team lost the first match, the resilient players practiced harder and won the next.',
-          'She felt resilient because she forgot to bring her lunch.',
-          'The soup was too resilient to eat without salt.'
-        ],
-        correctIndex: 1,
-        explanation: '"Resilient" means able to recover quickly from difficulties or setbacks—bouncing back after losing a match fits accurately.'
-      },
-      {
-        id: 'eng-g7-1',
-        grade: 'G7',
-        topic: 'Essay Thesis & Cohesion',
-        question: 'Which thesis statement is strongest for a Grade 7 argumentative essay on school uniforms?',
-        options: [
-          'School uniforms are something many schools have.',
-          'I like uniforms and I will write about them.',
-          'While critics argue uniforms limit self-expression, standardized dress codes reduce peer pressure and strengthen campus focus.',
-          'Uniforms are blue or grey in most schools.'
-        ],
-        correctIndex: 2,
-        explanation: 'A strong argumentative thesis acknowledges a counterargument ("While critics argue...") and states a clear, specific claim with reasons.'
-      }
+      q('en6-1', 'G6', undefined, 'Which sentence uses "resilient" correctly?', [
+        'The resilient glass broke at once.',
+        'After losing, the resilient team trained harder and won.',
+        'She felt resilient because she forgot lunch.',
+        'The soup was too resilient to eat.'
+      ], 1, '"Resilient" means able to bounce back after a setback.'),
+      q('en6-2', 'G6', undefined, 'Choose the correct verb: "Every student ___ a library card."', [
+        'have', 'has', 'having', 'are having'
+      ], 1, '"Every student" is singular, so we use "has".'),
+      q('en6-3', 'G6', undefined, 'Which word is a synonym of "enormous"?', [
+        'tiny', 'gigantic', 'quiet', 'ancient'
+      ], 1, '"Enormous" and "gigantic" both mean very big.'),
+      q('en7-1', 'G7', undefined, 'Which is the strongest thesis statement?', [
+        'School uniforms exist in many schools.',
+        'I will write about uniforms.',
+        'Although some say uniforms limit self-expression, they reduce peer pressure and improve focus.',
+        'Uniforms are often blue.'
+      ], 2, 'A strong thesis makes a clear claim and answers the other side.'),
+      q('en7-2', 'G7', undefined, 'Pick the best linking word: "The plan was cheap. ___, it was too slow."', [
+        'Therefore', 'However', 'For example', 'Similarly'
+      ], 1, '"However" shows a contrast between two ideas.'),
+      q('en7-3', 'G7', undefined, 'Which sentence is in the passive voice?', [
+        'The scientist tested the sample.',
+        'The sample was tested by the scientist.',
+        'The scientist is testing the sample.',
+        'The scientist will test the sample.'
+      ], 1, 'Passive voice: object + be + past participle (+ by ...).')
     ]
   },
   {
     id: 'ig-math',
     name: 'IG Math',
-    nameZh: 'IGCSE 国际数学',
-    tagline: '剑桥体系英文数学思维与阶梯训练',
-    badge: 'Cambridge Track',
-    accentText: 'text-emerald-400',
-    accentBg: 'bg-emerald-500/10',
-    accentBorder: 'border-emerald-500/30',
-    overview: {
-      G6: '衔接 Cambridge Lower Secondary Stage 7：整数与比值、百分数应用、基础代数式化简、周长面积与基础概率。',
-      G7: '对标 IGCSE Pre-Foundation（Stage 8）：线性方程与不等式、一次函数图像、几何角关系、体积与表面积、统计图表分析。'
-    },
+    nameZh: '国际数学',
+    emoji: '🧮',
+    short: { G6: '比例、百分数、代数入门', G7: '方程、函数图像、几何' },
     topics: {
-      G6: ['Ratios, Rates & Percentages', 'Algebraic Expressions', 'Area & Perimeter of Compound Shapes', 'Introductory Probability'],
-      G7: ['Linear Equations & Inequalities', 'Gradient & Straight-Line Graphs', 'Angles in Parallel Lines & Polygons', 'Volume, Surface Area & Data Handling']
-    },
-    externalUrl: {
-      label: '打开 MathGenius 刷题',
-      url: 'https://mathgenius.vanpower.live'
+      G6: ['Ratios & %', 'Algebra Basics', 'Area & Perimeter', 'Probability'],
+      G7: ['Linear Equations', 'Straight-Line Graphs', 'Angles', 'Volume & Data']
     },
     questions: [
-      {
-        id: 'igm-g6-1',
-        grade: 'G6',
-        topic: 'Ratios & Percentages',
-        question: 'A jacket originally costs $80. During a sale, the price is reduced by 25%. What is the sale price?',
-        options: ['$55', '$60', '$65', '$20'],
-        correctIndex: 1,
-        explanation: '25% of $80 is 0.25 × 80 = $20. Subtracting the discount: $80 - $20 = $60.'
-      },
-      {
-        id: 'igm-g7-1',
-        grade: 'G7',
-        topic: 'Linear Equations',
-        question: 'Solve for x: 3(2x - 4) = 18',
-        options: ['x = 3', 'x = 5', 'x = 7', 'x = 10'],
-        correctIndex: 1,
-        explanation: 'Divide both sides by 3: 2x - 4 = 6. Add 4 to both sides: 2x = 10, so x = 5.'
-      }
+      q('igm6-1', 'G6', undefined, 'A $80 jacket is 25% off. What is the sale price?', ['$55', '$60', '$65', '$20'], 1,
+        '25% of 80 = 20, and 80 − 20 = 60.'),
+      q('igm6-2', 'G6', undefined, 'Simplify the ratio 18 : 24.', ['3 : 4', '2 : 3', '9 : 16', '6 : 9'], 0,
+        'Divide both by 6: 18 ÷ 6 = 3, 24 ÷ 6 = 4.'),
+      q('igm6-3', 'G6', undefined, 'If a = 4, what is 3a + 5?', ['12', '17', '35', '9'], 1,
+        '3 × 4 + 5 = 12 + 5 = 17.'),
+      q('igm7-1', 'G7', undefined, 'Solve: 3(2x − 4) = 18', ['x = 3', 'x = 5', 'x = 7', 'x = 10'], 1,
+        '2x − 4 = 6, so 2x = 10, x = 5.'),
+      q('igm7-2', 'G7', undefined, 'What is the gradient of y = 3x − 2?', ['−2', '3', '2', '−3'], 1,
+        'In y = mx + c, the gradient is m = 3.'),
+      q('igm7-3', 'G7', undefined, 'The angles of a triangle are 50°, 60° and x. Find x.', ['60°', '70°', '80°', '90°'], 1,
+        'Angles in a triangle add to 180°: 180 − 50 − 60 = 70.')
     ]
   },
   {
     id: 'shanghai-math',
     name: '上海数学',
-    nameZh: '沪教版初中数学',
-    tagline: '紧扣上海六/七年级考纲与压轴思维训练',
-    badge: '沪教版同步',
-    accentText: 'text-teal-400',
-    accentBg: 'bg-teal-500/10',
-    accentBorder: 'border-teal-500/30',
-    overview: {
-      G6: '上海六年级（预初）核心模块：数的整除、分数与比和比例、圆和扇形、有理数运算以及一元一次方程与不等式。',
-      G7: '上海七年级核心模块：整式的加减乘除与因式分解、分式运算、相交线与平行线证明、全等三角形与平面直角坐标系。'
-    },
+    nameZh: '沪教版',
+    emoji: '📐',
+    short: { G6: '分数、比例、圆与方程', G7: '整式、分式、几何证明' },
     topics: {
-      G6: ['数的整除与素数分解', '分数、比和比例应用题', '圆与扇形的周长面积', '有理数与一元一次方程'],
-      G7: ['整式乘法与因式分解', '分式方程与化简求值', '相交线、平行线几何证明', '全等三角形与平面直角坐标系']
+      G6: ['数的整除', '比和比例', '圆与扇形', '一元一次方程'],
+      G7: ['整式乘法', '因式分解', '分式', '全等三角形']
     },
     questions: [
-      {
-        id: 'shm-g6-1',
-        grade: 'G6',
-        topic: '圆与扇形',
-        question: '一个半径为 6 cm 的圆，其圆心角为 120° 的扇形面积是多少？（结果保留 π）',
-        options: ['6π cm²', '12π cm²', '24π cm²', '36π cm²'],
-        correctIndex: 1,
-        explanation: '扇形面积公式 S = (n/360) × πr² = (120/360) × π × 6² = (1/3) × 36π = 12π cm²。'
-      },
-      {
-        id: 'shm-g7-1',
-        grade: 'G7',
-        topic: '因式分解',
-        question: '将多项式 x² - 9y² 因式分解，结果正确的是：',
-        options: ['(x - 3y)²', '(x + 9y)(x - 9y)', '(x + 3y)(x - 3y)', '(x - 3y)(x - 3y)'],
-        correctIndex: 2,
-        explanation: '利用平方差公式 a² - b² = (a + b)(a - b)，其中 a = x, b = 3y，得 (x + 3y)(x - 3y)。'
-      }
+      q('sh6-1', 'G6', undefined, '半径 6 cm、圆心角 120° 的扇形面积是？', ['6π cm²', '12π cm²', '24π cm²', '36π cm²'], 1,
+        'S = 120/360 × π × 6² = 12π。'),
+      q('sh6-2', 'G6', undefined, '解方程：2x + 7 = 19', ['x = 5', 'x = 6', 'x = 13', 'x = 4'], 1,
+        '2x = 12，x = 6。'),
+      q('sh6-3', 'G6', undefined, '36 和 48 的最大公因数是？', ['6', '8', '12', '24'], 2,
+        '36 = 12 × 3，48 = 12 × 4，最大公因数是 12。'),
+      q('sh7-1', 'G7', undefined, '因式分解：x² − 9y²', ['(x − 3y)²', '(x + 9y)(x − 9y)', '(x + 3y)(x − 3y)', 'x(x − 9y)'], 2,
+        '平方差公式：a² − b² = (a + b)(a − b)。'),
+      q('sh7-2', 'G7', undefined, '计算：(a + 2)²', ['a² + 4', 'a² + 2a + 4', 'a² + 4a + 4', 'a² + 4a + 2'], 2,
+        '完全平方公式：(a + b)² = a² + 2ab + b²。'),
+      q('sh7-3', 'G7', undefined, '判定两个三角形全等，下列哪个条件不一定成立？', ['SSS', 'SAS', 'ASA', 'AAA'], 3,
+        '三个角相等只能说明形状相同，大小不一定相同。')
     ]
   },
   {
     id: 'humanity',
     name: 'Humanity',
-    nameZh: '人文与社会科学',
-    tagline: 'History 历史 · Geography 地理 · 史料与空间分析',
-    badge: 'History & Geography',
-    accentText: 'text-amber-400',
-    accentBg: 'bg-amber-500/10',
-    accentBorder: 'border-amber-500/30',
-    overview: {
-      G6: '六年级聚焦古代大河文明（美索不达米亚、埃及、黄河与印度河）、地图比例尺与地形气候、以及一手史料与二手史料的辨析。',
-      G7: '七年级正式拆分为 History（历史）与 Geography（地理）两大主题：History 研习丝绸之路、中世纪至文艺复兴转型与史料批判；Geography 探索气候带、人口迁移与城市化议题。'
-    },
+    nameZh: '人文',
+    emoji: '🌍',
+    short: { G6: '古文明与地图', G7: '历史 + 地理' },
     topics: {
-      G6: ['Ancient River Valley Civilizations', 'Map Skills & Climate Zones', 'Primary vs. Secondary Sources', 'Early Trade & Cultural Exchange'],
-      G7: ['History: The Silk Road & Renaissance', 'History: Source Reliability & Causation', 'Geography: Climate & Biomes', 'Geography: Urbanization & Migration']
+      G6: ['大河文明', '地图技能', '史料辨析', '早期贸易'],
+      G7: []
     },
-    subTracks: {
+    tracks: {
       G7: [
-        {
-          id: 'history',
-          name: 'History',
-          nameZh: '历史',
-          description: '丝绸之路跨文化交流、中世纪社会结构、文艺复兴与史料可信度辨析。',
-          topics: ['The Silk Road & Eurasian Exchange', 'Medieval Society & Feudalism', 'Renaissance & Humanism', 'Primary Source Bias & Causation']
-        },
-        {
-          id: 'geography',
-          name: 'Geography',
-          nameZh: '地理',
-          description: '世界气候带与生态群落、人口分布与迁移、城市化进程与可持续发展。',
-          topics: ['Global Climate Zones & Biomes', 'Population Pyramids & Migration', 'Urbanization & Megacities', 'Natural Resources & Sustainability']
-        }
+        { id: 'history', name: 'History', nameZh: '历史', emoji: '🏛️', topics: ['丝绸之路', '中世纪', '文艺复兴', '史料与偏见'] },
+        { id: 'geography', name: 'Geography', nameZh: '地理', emoji: '🗺️', topics: ['气候与生物群落', '人口迁移', '城市化', '可持续发展'] }
       ]
     },
     questions: [
-      {
-        id: 'hum-g6-1',
-        grade: 'G6',
-        topic: 'Historical Sources',
-        question: 'Which of the following is an example of a PRIMARY source from Ancient Egypt?',
-        options: [
-          'A modern Grade 6 history textbook chapter on pharaohs',
-          'A documentary filmed in 2024 about the pyramids',
-          'A carved stone inscription created during Pharaoh Ramesses II’s reign',
-          'An encyclopedia article written by a historian'
-        ],
-        correctIndex: 2,
-        explanation: 'A primary source is created during the time period being studied. A stone inscription from Ramesses II’s reign is firsthand evidence.'
-      },
-      {
-        id: 'hum-g7-hist-1',
-        grade: 'G7',
-        subTrack: 'history',
-        topic: 'History · Silk Road Impact',
-        question: 'Beyond silk and spices, what was one of the most significant long-term impacts of the Silk Road?',
-        options: [
-          'It prevented any cultural contact between East and West.',
-          'It facilitated the spread of technologies (like papermaking), religions, and ideas across Eurasia.',
-          'It replaced all maritime trade routes permanently.',
-          'It was used exclusively by military armies.'
-        ],
-        correctIndex: 1,
-        explanation: 'The Silk Road connected Eurasia not only through goods, but also through papermaking, printing, astronomy, and religious traditions.'
-      },
-      {
-        id: 'hum-g7-geo-1',
-        grade: 'G7',
-        subTrack: 'geography',
-        topic: 'Geography · Urbanization & Push-Pull Factors',
-        question: 'Which of the following is a "pull factor" driving rural-to-urban migration in developing regions?',
-        options: [
-          'Severe drought destroying farmland in rural villages',
-          'Lack of secondary schools in countryside areas',
-          'Higher-paying manufacturing and service jobs available in cities',
-          'Flooding along rural riverbanks'
-        ],
-        correctIndex: 2,
-        explanation: 'Pull factors attract people to a destination (such as better employment, healthcare, and education in cities), whereas drought or flooding are push factors.'
-      }
+      q('hu6-1', 'G6', undefined, 'Which is a PRIMARY source about Ancient Egypt?', [
+        'A modern textbook', 'A 2024 documentary', 'A stone carving from Ramesses II’s time', 'An encyclopedia article'
+      ], 2, 'Primary sources come from the time being studied.'),
+      q('hu6-2', 'G6', undefined, 'Ancient Egypt grew along which river?', ['Tigris', 'Nile', 'Yellow River', 'Indus'], 1,
+        'The Nile’s floods made the land rich for farming.'),
+      q('hu6-3', 'G6', undefined, 'On a map, the scale 1 : 100 000 means 1 cm equals…', ['100 m', '1 km', '10 km', '100 km'], 1,
+        '100 000 cm = 1 000 m = 1 km.'),
+      q('hu7h-1', 'G7', 'history', 'Besides goods, what did the Silk Road spread?', [
+        'Nothing else', 'Ideas, religions and technology like papermaking', 'Only soldiers', 'Only gold'
+      ], 1, 'Ideas and inventions travelled with traders.'),
+      q('hu7h-2', 'G7', 'history', 'The Renaissance began in which country?', ['England', 'Italy', 'China', 'Egypt'], 1,
+        'It began in Italian cities like Florence in the 14th century.'),
+      q('hu7h-3', 'G7', 'history', 'Under feudalism, who gave land to knights in return for service?', ['Peasants', 'Lords', 'Merchants', 'Monks'], 1,
+        'Lords granted land (fiefs) to knights for military service.'),
+      q('hu7g-1', 'G7', 'geography', 'Which is a PULL factor for moving to a city?', [
+        'Drought on farms', 'No schools nearby', 'Better-paid jobs in the city', 'River flooding'
+      ], 2, 'Pull factors attract people; push factors drive them away.'),
+      q('hu7g-2', 'G7', 'geography', 'Which biome has the most rainfall?', ['Desert', 'Tundra', 'Tropical rainforest', 'Grassland'], 2,
+        'Tropical rainforests get rain almost every day.'),
+      q('hu7g-3', 'G7', 'geography', 'Which energy source is renewable?', ['Coal', 'Natural gas', 'Solar', 'Oil'], 2,
+        'Sunlight never runs out, so solar is renewable.')
     ]
   },
   {
     id: 'science',
     name: 'Science',
-    nameZh: '综合科学探索',
-    tagline: 'Physics 物理 · Biology 生物 · Chemistry 化学',
-    badge: 'Physics · Biology · Chemistry',
-    accentText: 'text-sky-400',
-    accentBg: 'bg-sky-500/10',
-    accentBorder: 'border-sky-500/30',
-    overview: {
-      G6: '六年级围绕 Physics（力与运动）、Biology（细胞与光合作用）与 Chemistry（物质三态与混合物分离）三大主题建立科学探究基础。',
-      G7: '七年级按 Physics（物理）、Biology（生物）、Chemistry（化学）三大分科深入：涵盖能量守恒与电路、人体系统与生态、元素化合物与化学反应。'
-    },
-    topics: {
-      G6: ['Physics: Forces & Simple Machines', 'Biology: Plant & Animal Cells', 'Chemistry: States of Matter & Mixtures', 'Scientific Method & Fair Testing'],
-      G7: ['Physics: Energy, Speed & Circuits', 'Biology: Respiration, Circulation & Ecosystems', 'Chemistry: Elements, Compounds & Reactions', 'Experimental Variables & Data Analysis']
-    },
-    subTracks: {
+    nameZh: '科学',
+    emoji: '🔬',
+    short: { G6: '物理 · 生物 · 化学', G7: '物理 · 生物 · 化学' },
+    topics: { G6: [], G7: [] },
+    tracks: {
       G6: [
-        {
-          id: 'physics',
-          name: 'Physics',
-          nameZh: '物理',
-          description: '力、重力与摩擦力、简单机械与能量转换基础。',
-          topics: ['Forces, Friction & Gravity', 'Balanced vs. Unbalanced Forces', 'Simple Machines & Levers']
-        },
-        {
-          id: 'biology',
-          name: 'Biology',
-          nameZh: '生物',
-          description: '动植物细胞结构、显微镜观察与植物光合作用。',
-          topics: ['Plant & Animal Cell Organelles', 'Photosynthesis Basics', 'Food Chains & Habitats']
-        },
-        {
-          id: 'chemistry',
-          name: 'Chemistry',
-          nameZh: '化学',
-          description: '物质三态变化、粒子模型与混合物分离实验。',
-          topics: ['States of Matter & Particle Model', 'Solutions & Solubility', 'Filtration, Evaporation & Distillation']
-        }
+        { id: 'physics', name: 'Physics', nameZh: '物理', emoji: '⚡', topics: ['力与重力', '摩擦力', '简单机械'] },
+        { id: 'biology', name: 'Biology', nameZh: '生物', emoji: '🌱', topics: ['动植物细胞', '光合作用', '食物链'] },
+        { id: 'chemistry', name: 'Chemistry', nameZh: '化学', emoji: '🧪', topics: ['物质三态', '溶解', '混合物分离'] }
       ],
       G7: [
-        {
-          id: 'physics',
-          name: 'Physics',
-          nameZh: '物理',
-          description: '速度与运动图像、能量守恒与转换、串联/并联电路及光声传播。',
-          topics: ['Speed, Distance-Time Graphs', 'Energy Conservation & Transfer', 'Series & Parallel Circuits', 'Waves, Light & Sound']
-        },
-        {
-          id: 'biology',
-          name: 'Biology',
-          nameZh: '生物',
-          description: '人体呼吸与循环系统、细胞呼吸、生态能量金字塔与食物网。',
-          topics: ['Respiratory & Circulatory Systems', 'Aerobic Cellular Respiration', 'Ecosystems & Energy Pyramids', 'Biodiversity & Adaptation']
-        },
-        {
-          id: 'chemistry',
-          name: 'Chemistry',
-          nameZh: '化学',
-          description: '元素周期表、原子与分子、物理/化学变化区分及酸碱中和反应。',
-          topics: ['Periodic Table: Elements & Compounds', 'Physical vs. Chemical Changes', 'Acids, Alkalis & pH Scale', 'Neutralization & Word Equations']
-        }
+        { id: 'physics', name: 'Physics', nameZh: '物理', emoji: '⚡', topics: ['速度与图像', '能量守恒', '电路', '光与声'] },
+        { id: 'biology', name: 'Biology', nameZh: '生物', emoji: '🌱', topics: ['呼吸与循环', '细胞呼吸', '生态系统', '适应与多样性'] },
+        { id: 'chemistry', name: 'Chemistry', nameZh: '化学', emoji: '🧪', topics: ['元素周期表', '物理/化学变化', '酸碱与 pH', '中和反应'] }
       ]
     },
     questions: [
-      {
-        id: 'sci-g6-bio-1',
-        grade: 'G6',
-        subTrack: 'biology',
-        topic: 'Biology · Cell Structure',
-        question: 'Which organelle is found in plant cells—but NOT in animal cells—and converts sunlight into chemical energy?',
-        options: ['Nucleus', 'Mitochondria', 'Chloroplast', 'Cell membrane'],
-        correctIndex: 2,
-        explanation: 'Chloroplasts contain chlorophyll and carry out photosynthesis in plant cells; animal cells do not have chloroplasts.'
-      },
-      {
-        id: 'sci-g6-phy-1',
-        grade: 'G6',
-        subTrack: 'physics',
-        topic: 'Physics · Forces',
-        question: 'When a book rests motionless on a flat table, what can be concluded about the vertical forces acting on it?',
-        options: [
-          'Only gravity is acting on the book.',
-          'Gravity and the upward normal force are balanced (equal and opposite).',
-          'Friction is greater than gravity.',
-          'There are no forces acting on the book.'
-        ],
-        correctIndex: 1,
-        explanation: 'An object at rest has zero net force: downward gravity is balanced by the equal upward normal force from the table.'
-      },
-      {
-        id: 'sci-g6-chem-1',
-        grade: 'G6',
-        subTrack: 'chemistry',
-        topic: 'Chemistry · Mixtures',
-        question: 'Which method is best for separating dissolved salt from saltwater while recovering pure water?',
-        options: ['Filtration', 'Simple distillation', 'Magnetism', 'Decanting'],
-        correctIndex: 1,
-        explanation: 'Salt is dissolved so it passes through filter paper. Simple distillation evaporates and condenses the water, leaving salt behind.'
-      },
-      {
-        id: 'sci-g7-phy-1',
-        grade: 'G7',
-        subTrack: 'physics',
-        topic: 'Physics · Circuits',
-        question: 'In a parallel circuit with two identical bulbs connected to a battery, what happens if one bulb breaks?',
-        options: [
-          'The other bulb immediately goes out too.',
-          'The other bulb stays lit because it still has a complete closed loop to the battery.',
-          'The battery voltage drops to zero.',
-          'Both bulbs become twice as dim.'
-        ],
-        correctIndex: 1,
-        explanation: 'In a parallel circuit, each branch provides an independent path for current back to the power source.'
-      },
-      {
-        id: 'sci-g7-bio-1',
-        grade: 'G7',
-        subTrack: 'biology',
-        topic: 'Biology · Cellular Respiration',
-        question: 'What are the two reactants required for aerobic cellular respiration in human muscle cells?',
-        options: [
-          'Carbon dioxide and water',
-          'Glucose and oxygen',
-          'Sunlight and chlorophyll',
-          'Nitrogen and glucose'
-        ],
-        correctIndex: 1,
-        explanation: 'Aerobic respiration uses glucose and oxygen to release energy, producing carbon dioxide and water as byproducts.'
-      },
-      {
-        id: 'sci-g7-chem-1',
-        grade: 'G7',
-        subTrack: 'chemistry',
-        topic: 'Chemistry · Chemical Reactions',
-        question: 'When hydrochloric acid reacts with sodium hydroxide (an alkali), what are the two products formed?',
-        options: [
-          'Hydrogen gas and oxygen gas',
-          'A salt (sodium chloride) and water',
-          'Carbon dioxide and glucose',
-          'Pure sodium metal and chlorine gas'
-        ],
-        correctIndex: 1,
-        explanation: 'Acid + Alkali → Salt + Water is a classic neutralization reaction: HCl + NaOH → NaCl + H₂O.'
-      }
+      q('sc6p-1', 'G6', 'physics', 'A book rests on a table. The forces on it are…', [
+        'Only gravity', 'Balanced: gravity and the table’s push', 'Friction bigger than gravity', 'No forces at all'
+      ], 1, 'At rest means the forces are balanced.'),
+      q('sc6p-2', 'G6', 'physics', 'Which force slows a sliding box?', ['Magnetism', 'Friction', 'Upthrust', 'Gravity only'], 1,
+        'Friction acts against motion.'),
+      q('sc6p-3', 'G6', 'physics', 'A lever helps us by…', ['Making things heavier', 'Reducing the force we need', 'Creating energy', 'Removing gravity'], 1,
+        'Levers trade distance for a smaller effort force.'),
+      q('sc6b-1', 'G6', 'biology', 'Which part is in plant cells but NOT animal cells?', ['Nucleus', 'Mitochondria', 'Chloroplast', 'Cell membrane'], 2,
+        'Chloroplasts do photosynthesis.'),
+      q('sc6b-2', 'G6', 'biology', 'Plants need which gas for photosynthesis?', ['Oxygen', 'Carbon dioxide', 'Nitrogen', 'Helium'], 1,
+        'CO₂ + water + light → glucose + oxygen.'),
+      q('sc6b-3', 'G6', 'biology', 'In grass → rabbit → fox, the rabbit is a…', ['Producer', 'Primary consumer', 'Top predator', 'Decomposer'], 1,
+        'It eats the producer (grass).'),
+      q('sc6c-1', 'G6', 'chemistry', 'Best way to get pure water from salt water?', ['Filtration', 'Distillation', 'Magnet', 'Sieving'], 1,
+        'Distillation boils the water and collects it again.'),
+      q('sc6c-2', 'G6', 'chemistry', 'In which state are particles furthest apart?', ['Solid', 'Liquid', 'Gas', 'All the same'], 2,
+        'Gas particles move freely and are far apart.'),
+      q('sc6c-3', 'G6', 'chemistry', 'Sand and water can be separated by…', ['Filtration', 'Evaporation only', 'Dissolving', 'Melting'], 0,
+        'Sand does not dissolve, so filter paper catches it.'),
+      q('sc7p-1', 'G7', 'physics', 'In a parallel circuit, one bulb breaks. The other bulb…', [
+        'Goes out', 'Stays on', 'Explodes', 'Gets twice as bright'
+      ], 1, 'Each branch has its own path to the battery.'),
+      q('sc7p-2', 'G7', 'physics', 'A car travels 120 km in 2 hours. Its speed is…', ['240 km/h', '60 km/h', '120 km/h', '30 km/h'], 1,
+        'Speed = distance ÷ time = 120 ÷ 2.'),
+      q('sc7p-3', 'G7', 'physics', 'Sound cannot travel through…', ['Water', 'Steel', 'Air', 'A vacuum'], 3,
+        'Sound needs particles to vibrate.'),
+      q('sc7b-1', 'G7', 'biology', 'Aerobic respiration needs glucose and…', ['Carbon dioxide', 'Oxygen', 'Sunlight', 'Nitrogen'], 1,
+        'Glucose + oxygen → CO₂ + water + energy.'),
+      q('sc7b-2', 'G7', 'biology', 'Which organ pumps blood around the body?', ['Lungs', 'Heart', 'Liver', 'Kidney'], 1,
+        'The heart is a muscular pump.'),
+      q('sc7b-3', 'G7', 'biology', 'In an energy pyramid, most energy is at the…', ['Top predators', 'Producers', 'Decomposers', 'Middle'], 1,
+        'Energy is lost at each level going up.'),
+      q('sc7c-1', 'G7', 'chemistry', 'Acid + alkali gives…', ['Hydrogen + oxygen', 'Salt + water', 'CO₂ + glucose', 'Metal + gas'], 1,
+        'This is neutralization: HCl + NaOH → NaCl + H₂O.'),
+      q('sc7c-2', 'G7', 'chemistry', 'Which is a chemical change?', ['Ice melting', 'Paper burning', 'Sugar dissolving', 'Glass breaking'], 1,
+        'Burning makes new substances and can’t be undone.'),
+      q('sc7c-3', 'G7', 'chemistry', 'A solution with pH 2 is…', ['Strongly acidic', 'Neutral', 'Weakly alkaline', 'Strongly alkaline'], 0,
+        'pH below 7 is acidic; the lower, the stronger.')
     ]
   }
 ];
+
+export const getSubject = (id?: string) => SUBJECTS.find((s) => s.id === id);
+
+export const gradeLabel = (g: GradeLevel) => (g === 'G6' ? '六年级' : '七年级');

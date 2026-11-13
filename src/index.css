@@ -1,82 +1,73 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap');
 @import "tailwindcss";
 
-@variant dark (&:where(.dark, .dark *));
-
 @theme {
-  --font-sans: "Inter", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-
-  /* Custom Stitch Colors */
-  --color-navy-900: #0A192F;
-  --color-navy-800: #112240;
-  
-  --color-ivory: #F8F8F0;
-  --color-ivory-dark: #E8E8E0;
-
-  --color-teal-accent: #64FFDA;
-  --color-teal-deep: #0D9488;
-
-  /* Custom Blur */
-  --blur-xs: 2px;
+  --font-sans: "Nunito", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", ui-rounded, system-ui, sans-serif;
+  --color-cream: #FFF8EC;
+  --color-ink: #1E1B2E;
 }
 
-@layer utilities {
-  .glass-card {
-    background: rgba(17, 34, 64, 0.7);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(100, 255, 218, 0.1);
-  }
-  
-  .gradient-text {
-    background: linear-gradient(135deg, #64FFDA 0%, #0D9488 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-
-  .glass-panel {
-    @apply backdrop-blur-xl bg-white/5 border border-white/10 shadow-[0_8px_32px_0_#0000004d];
-  }
-
-  .glass-panel-light {
-    @apply backdrop-blur-xl bg-black/5 border border-black/10 shadow-[0_8px_32px_0_#1f268712];
-  }
-
-  .text-glow {
-    text-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
-  }
-
-  .animate-float {
-    animation: float 6s ease-in-out infinite;
-  }
-
-  .animate-pulse-slow {
-    animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
+:root {
+  color-scheme: light;
 }
 
-@keyframes float {
-  0% {
-    transform: translateY(0px);
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* Chunky, playful card: thick border + solid offset shadow.
+     The border (not the shadow) carries the boundary, so it survives forced-colors mode. */
+  .chunky {
+    border: 3px solid var(--color-ink);
+    border-radius: 1.5rem;
+    box-shadow: 5px 5px 0 var(--color-ink);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+
+    @media (prefers-reduced-motion: no-preference) {
+      transition: background-color 0.15s ease, box-shadow 0.15s ease, translate 0.15s ease;
+    }
   }
 
-  50% {
-    transform: translateY(-10px);
+  a.chunky:hover,
+  button.chunky:hover:not(:disabled) {
+    box-shadow: 7px 7px 0 var(--color-ink);
+
+    @media (prefers-reduced-motion: no-preference) {
+      translate: -2px -2px;
+    }
   }
 
-  100% {
-    transform: translateY(0px);
+  a.chunky:active,
+  button.chunky:active:not(:disabled) {
+    box-shadow: 2px 2px 0 var(--color-ink);
+
+    @media (prefers-reduced-motion: no-preference) {
+      translate: 3px 3px;
+    }
+  }
+
+  .page-enter {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: page-in 0.35s ease-out both;
+    }
   }
 }
 
-@keyframes pulse {
+:focus-visible {
+  outline: 3px solid #2563EB;
+  outline-offset: 3px;
+}
 
-  0%,
-  100% {
+@keyframes page-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+  }
+  to {
     opacity: 1;
-  }
-
-  50% {
-    opacity: .7;
+    translate: 0 0;
   }
 }
