@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Sparkles, Calculator, LineChart, LogOut, LayoutDashboard } from 'lucide-react';
-import InteractiveDemos from './components/InteractiveDemos';
+import { Sparkles, Calculator, LogOut, LayoutDashboard, GraduationCap } from 'lucide-react';
+import SubjectPortal from './components/SubjectPortal';
 import ConsoleModal from './components/ConsoleModal';
 import HeroCanvas from './components/HeroCanvas';
 import { useAuth } from './hooks/useAuth';
@@ -63,6 +63,10 @@ export default function App() {
           </div>
           
           <div className="hidden md:flex items-center space-x-8 text-sm font-medium">
+            <a className="hover:text-teal-accent transition-colors flex items-center gap-1" href="#subjects">
+              <GraduationCap className="w-4 h-4 text-teal-accent" />
+              全科入口 (G6/G7)
+            </a>
             <button onClick={() => generateCustomTokenAndRedirect("https://mathgenius.vanpower.live")} className="text-emerald-500 hover:text-emerald-400 transition-colors flex items-center gap-1">
               MathGenius <Calculator className="w-4 h-4" />
             </button>
@@ -119,32 +123,31 @@ export default function App() {
         <section className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
           <div data-purpose="hero-content">
             <div className="inline-block px-4 py-1 rounded-full border border-teal-accent/30 bg-teal-accent/5 text-teal-accent text-xs font-bold tracking-widest uppercase mb-6">
-              Google AI K12 Education
+              VANPOWER K12 · GRADE 6 &amp; GRADE 7 PORTAL
             </div>
             <h1 className="text-3xl lg:text-4xl xl:text-5xl font-bold leading-tight mb-6">
-              VANPOWER <br/>
-              <span className="gradient-text">Your AI K12 Partner</span>
+              VANPOWER K12 <br/>
+              <span className="gradient-text">6/7 年级全科学习入口</span>
             </h1>
-            <h2 className="text-2xl lg:text-3xl font-light text-ivory/80 mb-8">
-              您的专属 AI 教育助手 — <span className="text-teal-accent/90">探索下一代 K12 学习体验</span>
+            <h2 className="text-xl lg:text-2xl font-light text-ivory/80 mb-6">
+              English · IG Math · 上海数学 · Humanity · Science
             </h2>
-            <p className="text-lg text-ivory/60 mb-10 max-w-lg leading-relaxed">
-              Top-tier AI integration tailored for K12 learners and educators. Highly efficient and interactive. Zero privacy leaks, ultra-low fees, exceptional performance.
-              <br/>为 K12 学习者和教育者量身定制的顶尖 AI 集成。高效且互动。无隐私泄露，极低费用，卓越性能。
+            <p className="text-base lg:text-lg text-ivory/60 mb-10 max-w-lg leading-relaxed">
+              面向六、七年级学生的 AI 交互式学习门户：英语涵盖 Wordsmith 造句与命题作文，数学覆盖 IG Math 与上海数学双轨，同步提供 Humanity 与 Science 随堂探究。
             </p>
             <div className="flex flex-wrap gap-4">
+              <a href="#subjects" className="px-8 py-4 bg-teal-accent text-navy-900 font-bold rounded-lg hover:shadow-[0_0_20px_rgba(100,255,218,0.4)] transition-all flex items-center gap-2">
+                <GraduationCap className="w-5 h-5" /> 进入科目中心 / Explore Subjects
+              </a>
               {user ? (
-                 <button onClick={() => setIsConsoleOpen(true)} className="px-8 py-4 bg-teal-accent text-navy-900 font-bold rounded-lg hover:shadow-[0_0_20px_rgba(100,255,218,0.4)] transition-all flex items-center gap-2">
-                   Open Console / 打开控制台
+                 <button onClick={() => setIsConsoleOpen(true)} className="px-8 py-4 bg-transparent border border-ivory/20 hover:border-teal-accent/60 rounded-lg transition-all flex items-center gap-2">
+                   Open Console / 控制台
                  </button>
               ) : (
-                <button onClick={signInWithGoogle} className="px-8 py-4 bg-teal-accent text-navy-900 font-bold rounded-lg hover:shadow-[0_0_20px_rgba(100,255,218,0.4)] transition-all flex items-center gap-2">
-                  <GoogleIcon /> Get Started / 立即开始
+                <button onClick={signInWithGoogle} className="px-8 py-4 bg-transparent border border-ivory/20 hover:border-teal-accent/60 rounded-lg transition-all flex items-center gap-2">
+                  <GoogleIcon /> Sign In / 登录
                 </button>
               )}
-              <a href="mailto:sales@vanpower.live" className="px-8 py-4 bg-transparent border border-ivory/20 hover:border-ivory/50 rounded-lg transition-all flex items-center justify-center text-center">
-                Contact Us / 联系我们
-              </a>
             </div>
           </div>
 
@@ -171,8 +174,8 @@ export default function App() {
         </section>
       </main>
 
-      {/* Interactive Demos Application Matrix */}
-      <InteractiveDemos />
+      {/* K12 5-Subject Portal */}
+      <SubjectPortal />
 
       {/* Features Grid */}
       <section className="py-24 bg-navy-800/50" id="features">
