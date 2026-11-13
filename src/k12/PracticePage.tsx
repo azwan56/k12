@@ -4,6 +4,15 @@ import { Subject, GradeLevel } from '../data/k12Subjects';
 import { THEME } from './ui';
 import { BackLink } from './SubjectPage';
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 interface Props {
   subject: Subject;
   grade: GradeLevel;
@@ -16,12 +25,20 @@ export default function PracticePage({ subject, grade, track }: Props) {
   const activeTrack = tracks.find((t) => t.id === track) ?? tracks[0];
   const backHref = `#/s/${subject.id}${activeTrack ? `?t=${activeTrack.id}` : ''}`;
 
+  const [round, setRound] = useState(0);
+
+  // Shuffle question order and option order every round so answers can't be memorised by position.
   const questions = useMemo(
     () =>
-      subject.questions.filter(
-        (q) => q.grade === grade && (!activeTrack || q.track === activeTrack.id)
-      ),
-    [subject, grade, activeTrack?.id]
+      shuffle(
+        subject.questions.filter(
+          (q) => q.grade === grade && (!activeTrack || q.track === activeTrack.id)
+        )
+      ).map((q) => {
+        const order = shuffle(q.options.map((_, i) => i));
+        return { ...q, options: order.map((i) => q.options[i]), answer: order.indexOf(q.answer) };
+      }),
+    [subject, grade, activeTrack?.id, round]
   );
 
   const [index, setIndex] = useState(0);
@@ -60,7 +77,7 @@ export default function PracticePage({ subject, grade, track }: Props) {
           <p className="text-xl font-bold mt-2">{perfect ? '全对，太棒了！' : '继续加油！'}</p>
         </div>
         <div className="grid grid-cols-2 gap-4 mt-6">
-          <button type="button" onClick={restart} className="chunky bg-white py-4 text-xl font-black flex items-center justify-center gap-2">
+          <button type="button" onClick={() => setRound((r) => r + 1)} className="chunky bg-white py-4 text-xl font-black flex items-center justify-center gap-2">
             <RotateCcw className="w-5 h-5" aria-hidden="true" /> 再来一次
           </button>
           <a href={backHref} className="chunky bg-yellow-300 py-4 text-xl font-black text-center">
