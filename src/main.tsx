@@ -3,11 +3,17 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { AuthProvider } from './hooks/useAuth';
+import { consumeImportHash, pullFromLegacyOrigins } from './k12/migrate';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
-  </StrictMode>,
-);
+consumeImportHash()
+  .catch((e) => console.warn('[migrate] import failed', e))
+  .finally(() => {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </StrictMode>,
+    );
+    pullFromLegacyOrigins();
+  });

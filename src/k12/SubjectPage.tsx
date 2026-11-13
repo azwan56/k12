@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, ExternalLink, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Play } from 'lucide-react';
 import { Subject, GradeLevel } from '../data/k12Subjects';
 import { THEME, replaceQuery } from './ui';
-import { useAuth } from '../hooks/useAuth';
 
 interface Props {
   subject: Subject;
@@ -22,7 +21,6 @@ export function BackLink({ href, label = '返回' }: { href: string; label?: str
 export default function SubjectPage({ subject, grade, initialTrack }: Props) {
   const theme = THEME[subject.id];
   const tracks = subject.tracks?.[grade] ?? [];
-  const { generateCustomTokenAndRedirect } = useAuth();
 
   const pickTrack = (id: string | null) =>
     tracks.find((t) => t.id === id)?.id ?? tracks[0]?.id ?? null;
@@ -62,16 +60,12 @@ export default function SubjectPage({ subject, grade, initialTrack }: Props) {
       {/* English: two main tools */}
       {subject.id === 'english' && (
         <div className="grid sm:grid-cols-2 gap-5 mt-8">
-          <button
-            type="button"
-            onClick={() => generateCustomTokenAndRedirect('https://wordsmith.vanpower.live')}
-            className="chunky bg-white p-6 text-left"
-          >
+          <a href="#/s/english/wordsmith" className="chunky bg-white p-6 block">
             <span className="text-4xl" aria-hidden="true">✍️</span>
             <span className="flex items-center gap-2 text-2xl font-black mt-3">
-              Wordsmith 造句 <ExternalLink className="w-5 h-5" aria-hidden="true" />
+              Wordsmith 造句 <ArrowRight className="w-5 h-5" aria-hidden="true" />
             </span>
-          </button>
+          </a>
           <a href="#/s/english/essay" className="chunky bg-white p-6 block">
             <span className="text-4xl" aria-hidden="true">📝</span>
             <span className="flex items-center gap-2 text-2xl font-black mt-3">
@@ -81,17 +75,13 @@ export default function SubjectPage({ subject, grade, initialTrack }: Props) {
         </div>
       )}
 
-      {/* IG Math: link to MathGenius */}
+      {/* IG Math: adaptive MathGenius quiz */}
       {subject.id === 'ig-math' && (
-        <button
-          type="button"
-          onClick={() => generateCustomTokenAndRedirect('https://mathgenius.vanpower.live')}
-          className="chunky bg-white p-5 mt-8 w-full flex items-center gap-3 text-left"
-        >
+        <a href="#/s/ig-math/mathgenius" className="chunky bg-white p-5 mt-8 w-full flex items-center gap-3">
           <span className="text-3xl" aria-hidden="true">🚀</span>
-          <span className="text-xl font-black flex-1">MathGenius 刷题</span>
-          <ExternalLink className="w-5 h-5" aria-hidden="true" />
-        </button>
+          <span className="text-xl font-black flex-1">MathGenius 闯关</span>
+          <ArrowRight className="w-5 h-5" aria-hidden="true" />
+        </a>
       )}
 
       {/* Sub-tracks */}
