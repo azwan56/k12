@@ -4,11 +4,20 @@ export type GradeLevel = 'G6' | 'G7';
 export interface PracticeQuestion {
   id: string;
   grade: GradeLevel;
+  subTrack?: string;
   topic: string;
   question: string;
   options: string[];
   correctIndex: number;
   explanation: string;
+}
+
+export interface SubTrack {
+  id: string;
+  name: string;
+  nameZh: string;
+  description: string;
+  topics: string[];
 }
 
 export interface EssayPrompt {
@@ -32,6 +41,7 @@ export interface SubjectConfig {
   accentBorder: string;
   overview: Record<GradeLevel, string>;
   topics: Record<GradeLevel, string[]>;
+  subTracks?: Partial<Record<GradeLevel, SubTrack[]>>;
   externalUrl?: {
     label: string;
     url: string;
@@ -235,18 +245,36 @@ export const K12_SUBJECTS: SubjectConfig[] = [
     id: 'humanity',
     name: 'Humanity',
     nameZh: '人文与社会科学',
-    tagline: '历史思辨 · 人文地理 · 史料分析',
+    tagline: 'History 历史 · Geography 地理 · 史料与空间分析',
     badge: 'History & Geography',
     accentText: 'text-amber-400',
     accentBg: 'bg-amber-500/10',
     accentBorder: 'border-amber-500/30',
     overview: {
       G6: '六年级聚焦古代大河文明（美索不达米亚、埃及、黄河与印度河）、地图比例尺与地形气候、以及一手史料与二手史料的辨析。',
-      G7: '七年级深入丝绸之路跨文化交流、中世纪至文艺复兴转型、人口迁移与城市化地理议题，培养基于证据的因果论证能力。'
+      G7: '七年级正式拆分为 History（历史）与 Geography（地理）两大主题：History 研习丝绸之路、中世纪至文艺复兴转型与史料批判；Geography 探索气候带、人口迁移与城市化议题。'
     },
     topics: {
       G6: ['Ancient River Valley Civilizations', 'Map Skills & Climate Zones', 'Primary vs. Secondary Sources', 'Early Trade & Cultural Exchange'],
-      G7: ['The Silk Road & Global Connections', 'Renaissance & Scientific Shift', 'Urbanization & Human Geography', 'Source Reliability & Bias Analysis']
+      G7: ['History: The Silk Road & Renaissance', 'History: Source Reliability & Causation', 'Geography: Climate & Biomes', 'Geography: Urbanization & Migration']
+    },
+    subTracks: {
+      G7: [
+        {
+          id: 'history',
+          name: 'History',
+          nameZh: '历史',
+          description: '丝绸之路跨文化交流、中世纪社会结构、文艺复兴与史料可信度辨析。',
+          topics: ['The Silk Road & Eurasian Exchange', 'Medieval Society & Feudalism', 'Renaissance & Humanism', 'Primary Source Bias & Causation']
+        },
+        {
+          id: 'geography',
+          name: 'Geography',
+          nameZh: '地理',
+          description: '世界气候带与生态群落、人口分布与迁移、城市化进程与可持续发展。',
+          topics: ['Global Climate Zones & Biomes', 'Population Pyramids & Migration', 'Urbanization & Megacities', 'Natural Resources & Sustainability']
+        }
+      ]
     },
     questions: [
       {
@@ -264,9 +292,10 @@ export const K12_SUBJECTS: SubjectConfig[] = [
         explanation: 'A primary source is created during the time period being studied. A stone inscription from Ramesses II’s reign is firsthand evidence.'
       },
       {
-        id: 'hum-g7-1',
+        id: 'hum-g7-hist-1',
         grade: 'G7',
-        topic: 'Silk Road Impact',
+        subTrack: 'history',
+        topic: 'History · Silk Road Impact',
         question: 'Beyond silk and spices, what was one of the most significant long-term impacts of the Silk Road?',
         options: [
           'It prevented any cultural contact between East and West.',
@@ -276,6 +305,21 @@ export const K12_SUBJECTS: SubjectConfig[] = [
         ],
         correctIndex: 1,
         explanation: 'The Silk Road connected Eurasia not only through goods, but also through papermaking, printing, astronomy, and religious traditions.'
+      },
+      {
+        id: 'hum-g7-geo-1',
+        grade: 'G7',
+        subTrack: 'geography',
+        topic: 'Geography · Urbanization & Push-Pull Factors',
+        question: 'Which of the following is a "pull factor" driving rural-to-urban migration in developing regions?',
+        options: [
+          'Severe drought destroying farmland in rural villages',
+          'Lack of secondary schools in countryside areas',
+          'Higher-paying manufacturing and service jobs available in cities',
+          'Flooding along rural riverbanks'
+        ],
+        correctIndex: 2,
+        explanation: 'Pull factors attract people to a destination (such as better employment, healthcare, and education in cities), whereas drought or flooding are push factors.'
       }
     ]
   },
@@ -283,42 +327,147 @@ export const K12_SUBJECTS: SubjectConfig[] = [
     id: 'science',
     name: 'Science',
     nameZh: '综合科学探索',
-    tagline: '物理 · 化学 · 生物 · 科学探究方法',
-    badge: 'Lab & Inquiry',
+    tagline: 'Physics 物理 · Biology 生物 · Chemistry 化学',
+    badge: 'Physics · Biology · Chemistry',
     accentText: 'text-sky-400',
     accentBg: 'bg-sky-500/10',
     accentBorder: 'border-sky-500/30',
     overview: {
-      G6: '六年级建立科学探究基础：物质的三态与混合物分离、细胞结构与植物光合作用、力与简单机械、地球水循环与天气系统。',
-      G7: '七年级进阶实验设计（控制变量法）：元素周期表与化学反应、能量守恒与电路基础、人体呼吸与循环系统、板块构造与生态平衡。'
+      G6: '六年级围绕 Physics（力与运动）、Biology（细胞与光合作用）与 Chemistry（物质三态与混合物分离）三大主题建立科学探究基础。',
+      G7: '七年级按 Physics（物理）、Biology（生物）、Chemistry（化学）三大分科深入：涵盖能量守恒与电路、人体系统与生态、元素化合物与化学反应。'
     },
     topics: {
-      G6: ['States of Matter & Mixtures', 'Plant & Animal Cells', 'Forces, Friction & Gravity', 'Water Cycle & Weather'],
-      G7: ['Scientific Method & Fair Testing', 'Elements, Compounds & Reactions', 'Energy Transfer & Simple Circuits', 'Ecosystems & Plate Tectonics']
+      G6: ['Physics: Forces & Simple Machines', 'Biology: Plant & Animal Cells', 'Chemistry: States of Matter & Mixtures', 'Scientific Method & Fair Testing'],
+      G7: ['Physics: Energy, Speed & Circuits', 'Biology: Respiration, Circulation & Ecosystems', 'Chemistry: Elements, Compounds & Reactions', 'Experimental Variables & Data Analysis']
+    },
+    subTracks: {
+      G6: [
+        {
+          id: 'physics',
+          name: 'Physics',
+          nameZh: '物理',
+          description: '力、重力与摩擦力、简单机械与能量转换基础。',
+          topics: ['Forces, Friction & Gravity', 'Balanced vs. Unbalanced Forces', 'Simple Machines & Levers']
+        },
+        {
+          id: 'biology',
+          name: 'Biology',
+          nameZh: '生物',
+          description: '动植物细胞结构、显微镜观察与植物光合作用。',
+          topics: ['Plant & Animal Cell Organelles', 'Photosynthesis Basics', 'Food Chains & Habitats']
+        },
+        {
+          id: 'chemistry',
+          name: 'Chemistry',
+          nameZh: '化学',
+          description: '物质三态变化、粒子模型与混合物分离实验。',
+          topics: ['States of Matter & Particle Model', 'Solutions & Solubility', 'Filtration, Evaporation & Distillation']
+        }
+      ],
+      G7: [
+        {
+          id: 'physics',
+          name: 'Physics',
+          nameZh: '物理',
+          description: '速度与运动图像、能量守恒与转换、串联/并联电路及光声传播。',
+          topics: ['Speed, Distance-Time Graphs', 'Energy Conservation & Transfer', 'Series & Parallel Circuits', 'Waves, Light & Sound']
+        },
+        {
+          id: 'biology',
+          name: 'Biology',
+          nameZh: '生物',
+          description: '人体呼吸与循环系统、细胞呼吸、生态能量金字塔与食物网。',
+          topics: ['Respiratory & Circulatory Systems', 'Aerobic Cellular Respiration', 'Ecosystems & Energy Pyramids', 'Biodiversity & Adaptation']
+        },
+        {
+          id: 'chemistry',
+          name: 'Chemistry',
+          nameZh: '化学',
+          description: '元素周期表、原子与分子、物理/化学变化区分及酸碱中和反应。',
+          topics: ['Periodic Table: Elements & Compounds', 'Physical vs. Chemical Changes', 'Acids, Alkalis & pH Scale', 'Neutralization & Word Equations']
+        }
+      ]
     },
     questions: [
       {
-        id: 'sci-g6-1',
+        id: 'sci-g6-bio-1',
         grade: 'G6',
-        topic: 'Biology: Cell Structure',
+        subTrack: 'biology',
+        topic: 'Biology · Cell Structure',
         question: 'Which organelle is found in plant cells—but NOT in animal cells—and converts sunlight into chemical energy?',
         options: ['Nucleus', 'Mitochondria', 'Chloroplast', 'Cell membrane'],
         correctIndex: 2,
         explanation: 'Chloroplasts contain chlorophyll and carry out photosynthesis in plant cells; animal cells do not have chloroplasts.'
       },
       {
-        id: 'sci-g7-1',
-        grade: 'G7',
-        topic: 'Scientific Inquiry',
-        question: 'In an experiment testing how temperature affects the rate at which sugar dissolves in water, what is the independent variable?',
+        id: 'sci-g6-phy-1',
+        grade: 'G6',
+        subTrack: 'physics',
+        topic: 'Physics · Forces',
+        question: 'When a book rests motionless on a flat table, what can be concluded about the vertical forces acting on it?',
         options: [
-          'The time it takes for the sugar to dissolve',
-          'The temperature of the water',
-          'The volume of water used in each beaker',
-          'The brand of sugar'
+          'Only gravity is acting on the book.',
+          'Gravity and the upward normal force are balanced (equal and opposite).',
+          'Friction is greater than gravity.',
+          'There are no forces acting on the book.'
         ],
         correctIndex: 1,
-        explanation: 'The independent variable is the factor intentionally changed by the experimenter—in this case, water temperature. Dissolving time is the dependent variable, and water volume/sugar brand are controlled variables.'
+        explanation: 'An object at rest has zero net force: downward gravity is balanced by the equal upward normal force from the table.'
+      },
+      {
+        id: 'sci-g6-chem-1',
+        grade: 'G6',
+        subTrack: 'chemistry',
+        topic: 'Chemistry · Mixtures',
+        question: 'Which method is best for separating dissolved salt from saltwater while recovering pure water?',
+        options: ['Filtration', 'Simple distillation', 'Magnetism', 'Decanting'],
+        correctIndex: 1,
+        explanation: 'Salt is dissolved so it passes through filter paper. Simple distillation evaporates and condenses the water, leaving salt behind.'
+      },
+      {
+        id: 'sci-g7-phy-1',
+        grade: 'G7',
+        subTrack: 'physics',
+        topic: 'Physics · Circuits',
+        question: 'In a parallel circuit with two identical bulbs connected to a battery, what happens if one bulb breaks?',
+        options: [
+          'The other bulb immediately goes out too.',
+          'The other bulb stays lit because it still has a complete closed loop to the battery.',
+          'The battery voltage drops to zero.',
+          'Both bulbs become twice as dim.'
+        ],
+        correctIndex: 1,
+        explanation: 'In a parallel circuit, each branch provides an independent path for current back to the power source.'
+      },
+      {
+        id: 'sci-g7-bio-1',
+        grade: 'G7',
+        subTrack: 'biology',
+        topic: 'Biology · Cellular Respiration',
+        question: 'What are the two reactants required for aerobic cellular respiration in human muscle cells?',
+        options: [
+          'Carbon dioxide and water',
+          'Glucose and oxygen',
+          'Sunlight and chlorophyll',
+          'Nitrogen and glucose'
+        ],
+        correctIndex: 1,
+        explanation: 'Aerobic respiration uses glucose and oxygen to release energy, producing carbon dioxide and water as byproducts.'
+      },
+      {
+        id: 'sci-g7-chem-1',
+        grade: 'G7',
+        subTrack: 'chemistry',
+        topic: 'Chemistry · Chemical Reactions',
+        question: 'When hydrochloric acid reacts with sodium hydroxide (an alkali), what are the two products formed?',
+        options: [
+          'Hydrogen gas and oxygen gas',
+          'A salt (sodium chloride) and water',
+          'Carbon dioxide and glucose',
+          'Pure sodium metal and chlorine gas'
+        ],
+        correctIndex: 1,
+        explanation: 'Acid + Alkali → Salt + Water is a classic neutralization reaction: HCl + NaOH → NaCl + H₂O.'
       }
     ]
   }

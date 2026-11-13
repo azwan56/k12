@@ -27,6 +27,7 @@ const SUBJECT_ICONS: Record<SubjectId, React.ReactNode> = {
 export default function SubjectPortal() {
   const [activeSubjectId, setActiveSubjectId] = useState<SubjectId>('english');
   const [grade, setGrade] = useState<GradeLevel>('G6');
+  const [selectedSubTracks, setSelectedSubTracks] = useState<Record<string, string>>({});
   const [showEssayStudio, setShowEssayStudio] = useState(true);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
   const { generateCustomTokenAndRedirect } = useAuth();
@@ -112,7 +113,18 @@ export default function SubjectPortal() {
         <div>
           {K12_SUBJECTS.map((subject) => {
             const isSelected = activeSubjectId === subject.id;
-            const gradeQuestions = subject.questions.filter((q) => q.grade === grade);
+            const subTracks = subject.subTracks?.[grade] ?? [];
+            const activeSubTrackId =
+              subTracks.length > 0
+                ? selectedSubTracks[`${subject.id}-${grade}`] || subTracks[0].id
+                : null;
+            const activeSubTrack = subTracks.find((t) => t.id === activeSubTrackId) || null;
+            const displayedTopics = activeSubTrack ? activeSubTrack.topics : subject.topics[grade];
+            const gradeQuestions = subject.questions.filter(
+              (q) =>
+                q.grade === grade &&
+                (!activeSubTrack || !q.subTrack || q.subTrack === activeSubTrack.id)
+            );
 
             return (
               <div
@@ -216,13 +228,56 @@ export default function SubjectPortal() {
                     </div>
                   )}
 
+                  {/* Sub-Tracks Selector (e.g. G7 Humanity: History / Geography; Science: Physics / Biology / Chemistry) */}
+                  {subTracks.length > 0 && (
+                    <div className="rounded-xl bg-navy-900/60 border border-ivory/10 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-xs font-semibold text-teal-accent uppercase tracking-wider">
+                          分科主题 / Sub-Tracks ({grade})
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {subTracks.map((track) => {
+                            const isTrackActive = track.id === activeSubTrackId;
+                            return (
+                              <button
+                                key={track.id}
+                                type="button"
+                                onClick={() =>
+                                  setSelectedSubTracks((prev) => ({
+                                    ...prev,
+                                    [`${subject.id}-${grade}`]: track.id
+                                  }))
+                                }
+                                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                  isTrackActive
+                                    ? `${subject.accentBg} ${subject.accentText} ${subject.accentBorder}`
+                                    : 'bg-navy-800/60 border-ivory/10 text-ivory/60 hover:text-ivory'
+                                }`}
+                              >
+                                {track.name} · {track.nameZh}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {activeSubTrack && (
+                        <p className="text-xs md:text-sm text-ivory/75 leading-relaxed">
+                          <span className="font-semibold text-ivory mr-1.5">
+                            {activeSubTrack.name} ({activeSubTrack.nameZh}):
+                          </span>
+                          {activeSubTrack.description}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Core Topics Grid */}
                   <div>
                     <h4 className="text-xs font-semibold text-teal-accent uppercase tracking-wider mb-3">
-                      核心知识模块 / Core Topics ({grade})
+                      核心知识模块 / Core Topics ({grade}{activeSubTrack ? ` · ${activeSubTrack.name}` : ''})
                     </h4>
                     <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {subject.topics[grade].map((topic, idx) => (
+                      {displayedTopics.map((topic, idx) => (
                         <div
                           key={idx}
                           className="rounded-xl bg-navy-900/60 border border-ivory/10 px-4 py-3 text-sm text-ivory/85 flex items-center gap-2.5"
