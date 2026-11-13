@@ -613,39 +613,59 @@ export const getWordBatch = async (count: number): Promise<WordChallenge[]> => {
   return array.slice(0, count);
 };
 
+const cleanWordToken = (raw: string) =>
+  raw.trim().replace(/^\d+[\.\)、\)]\s*|^[•\-*]\s*/, '').trim();
+
 export const createCustomBatch = async (words: string[]): Promise<WordChallenge[]> => {
   if (words.length === 0) return [];
-  const cleanWords = words.map(w => w.trim()).filter(w => w.length > 0 && w.length < 30).slice(0, 50);
+  const cleanWords = Array.from(
+    new Set(words.map(cleanWordToken).filter((w) => w.length > 0 && w.length < 40))
+  ).slice(0, 50);
   if (cleanWords.length === 0) return [];
 
-  try {
-    const generateBatch = httpsCallable(functions, 'generateWordsmithBatch');
-    const result = await generateBatch({ words: cleanWords }) as { data: WordChallenge[] };
-    return result.data;
-  } catch (error: any) {
-    console.error("Custom batch generation failed", error);
-    return cleanWords.map(w => ({
-      word: w,
-      partOfSpeech: "error",
-      definition: `API Error: ${error?.message || String(error)}`,
-      synonyms: []
-    }));
+  const localByLower = new Map(WORD_BANK.map((item) => [item.word.toLowerCase(), item]));
+  const missingWords = cleanWords.filter((w) => !localByLower.has(w.toLowerCase()));
+
+  let remoteByLower = new Map<string, WordChallenge>();
+  if (missingWords.length > 0) {
+    try {
+      const generateBatch = httpsCallable(functions, 'generateWordsmithBatch', { timeout: 60000 });
+      const result = (await generateBatch({ words: missingWords })) as { data: WordChallenge[] };
+      if (Array.isArray(result.data)) {
+        remoteByLower = new Map(result.data.map((item) => [item.word.toLowerCase(), item]));
+      }
+    } catch (error: any) {
+      console.error("Custom batch generation failed", error);
+    }
   }
+
+  return cleanWords.map((w) => {
+    const key = w.toLowerCase();
+    return (
+      localByLower.get(key) ||
+      remoteByLower.get(key) || {
+        word: w,
+        partOfSpeech: "error",
+        definition: "词典解释暂未加载，仍可直接造句练习。",
+        synonyms: []
+      }
+    );
+  });
 };
 
 export const evaluateSentence = async (word: string, sentence: string): Promise<EvaluationResult> => {
   try {
-    const evaluate = httpsCallable(functions, 'evaluateWordsmithSentence');
+    const evaluate = httpsCallable(functions, 'evaluateWordsmithSentence', { timeout: 60000 });
     const result = await evaluate({ word, sentence }) as { data: EvaluationResult };
     return result.data;
   } catch (error) {
     console.error("Evaluation error:", error);
     return {
       score: 3,
-      feedback: "I received your sentence! My connection is a bit slow right now, but keep up the great effort!",
+      feedback: "暂时未能连接评分服务，已先记录你的句子，稍后可重试。",
       betterExamples: [
-        `The ${word} child went to the park.`,
-        `We should always try to be ${word} in our work.`
+        `She showed a ${word} attitude when helping her classmates.`,
+        `We practiced using "${word}" naturally in our writing today.`
       ]
     };
   }

@@ -10,9 +10,14 @@ interface Props {
 export default function CustomWordInput({ onSubmit, onCancel, isLoading }: Props) {
   const [inputText, setInputText] = useState('');
 
-  // Same parsing as the original: split by commas or new lines, trim, de-duplicate.
+  // Split by commas or new lines, strip list numbering/bullets (e.g. "1. gentle"), trim, de-duplicate.
   const words = Array.from(
-    new Set(inputText.split(/[\n,]+/).map((w) => w.trim()).filter((w) => w.length > 0))
+    new Set(
+      inputText
+        .split(/[\n,，]+/)
+        .map((w) => w.trim().replace(/^\d+[\.\)、\)]\s*|^[•\-*]\s*/, '').trim())
+        .filter((w) => w.length > 0)
+    )
   );
 
   const handleSubmit = () => {
