@@ -96,7 +96,7 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
             aria-expanded={titleMenuOpen}
             aria-haspopup="menu"
             onClick={() => setTitleMenuOpen((o) => !o)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full border-[3px] border-ink bg-amber-100 text-xs sm:text-sm font-black hover:bg-amber-200 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-[3px] border-ink bg-amber-100 text-xs sm:text-sm font-black hover:bg-amber-200 transition-colors whitespace-nowrap shrink-0"
             title={`头衔：${activeTitle.label}（${rewards.xp} XP）· 点击切换`}
           >
             <span aria-hidden="true">🪙</span>
@@ -104,8 +104,9 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
             <span className="text-slate-400" aria-hidden="true">|</span>
             <span aria-hidden="true">🔥</span>
             <span className="tabular-nums">{rewards.streak.current}</span>
-            <span className="hidden md:inline text-amber-900 ml-1">
-              {activeTitle.emoji} {activeTitle.label}
+            <span className="hidden sm:inline text-slate-400" aria-hidden="true">|</span>
+            <span className="hidden sm:inline" aria-hidden="true">
+              {activeTitle.emoji}
             </span>
           </button>
 
@@ -185,7 +186,7 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
               displayName={resolvedName}
               size="sm"
             />
-            <span className="hidden md:inline max-w-[92px] truncate text-sm font-extrabold text-ink">
+            <span className="hidden md:inline max-w-[120px] truncate text-sm font-extrabold text-ink">
               {resolvedName}
             </span>
             <ChevronDown
