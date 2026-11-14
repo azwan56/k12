@@ -84,6 +84,15 @@ export default function SubjectPage({ subject, grade, initialTrack }: Props) {
         </a>
       )}
 
+      {/* Humanity: 3-season 30-level adventure */}
+      {subject.id === 'humanity' && (
+        <a href="#/s/humanity/adventure" className="chunky bg-white p-5 mt-8 w-full flex items-center gap-3">
+          <span className="text-3xl" aria-hidden="true">🏛️</span>
+          <span className="text-xl font-black flex-1">中华历史地理大闯关 · 三季 30 关</span>
+          <ArrowRight className="w-5 h-5" aria-hidden="true" />
+        </a>
+      )}
+
       {/* Sub-tracks */}
       {tracks.length > 0 && (
         <div role="group" aria-label="选择分科" className="flex flex-wrap gap-3 mt-8">

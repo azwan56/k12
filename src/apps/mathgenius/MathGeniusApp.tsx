@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
+import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
 import type { ActivityRewardOutcome } from '../../k12/rewards';
-import { AppState, Question, UserAnswer, QuizResult, DifficultyLevel, StudentLearningProfile } from './types';
+import type { QuestionReviewItem } from '../../k12/studentProgress';
+import { recordStudentActivity, updateStudentActivityFeedback } from '../../k12/studentProgressService';
+import {
+  AppState,
+  Question,
+  UserAnswer,
+  QuizResult,
+  DifficultyLevel,
+  StudentLearningProfile,
+  GRADE_6_CATEGORIES,
+  DIFFICULTY_CONFIGS,
+} from './types';
 import { generateMathQuestions, getFinalFeedbackStream } from './services/geminiService';
 import { getLearningProfile, saveLearningProfile, recordQuizCompletion } from './services/learningProfileService';
 import { useLanguage } from './hooks/useLanguage';
@@ -17,6 +29,7 @@ const BACK_HREF = '#/s/ig-math';
 
 export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
   const { user, loading, needsSSOSync, signInWithGoogle } = useAuth();
+  const { profile: portalProfile, resolvedName, effectiveAvatarId } = useProfile();
   const [language, setLanguage] = useLanguage();
   const [state, setState] = useState<AppState>(AppState.WELCOME);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -119,8 +132,57 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         levelRecommendation,
         weakPointsIdentified
       });
-      setRewardOutcome(recordMathGenius(score, questions.length));
+      const outcome = recordMathGenius(score, questions.length);
+      setRewardOutcome(outcome);
       setState(AppState.RESULTS);
+
+      let activityPromise: Promise<string | null> | null = null;
+      if (user) {
+        const questionItems: QuestionReviewItem[] = allAnswers.map((a) => {
+          const q = questions.find((item) => item.id === a.questionId);
+          return {
+            question: q?.question || '数学题',
+            userAnswer: a.answer || '未作答',
+            correctAnswer: q?.correctAnswer || '',
+            isCorrect: a.isCorrect,
+            attempts: a.attempts,
+            usedHint: a.usedHint,
+            category: q?.category,
+          };
+        });
+        const weakPoints = weakPointsIdentified.map(
+          (id) => GRADE_6_CATEGORIES.find((c) => c.id === id)?.labelZh || id
+        );
+        const categoryLabel =
+          GRADE_6_CATEGORIES.find((c) => c.id === selectedCategory)?.labelZh || '综合练习';
+        const diffLabel = DIFFICULTY_CONFIGS[difficulty]?.shortLabelZh || difficulty;
+        activityPromise = recordStudentActivity(
+          user,
+          {
+            profile: portalProfile,
+            resolvedName,
+            effectiveAvatarId,
+            rewards: outcome.nextState,
+          },
+          {
+            id: `mg_${Date.now()}`,
+            type: 'mathgenius',
+            subjectId: 'ig-math',
+            title: `MathGenius · ${categoryLabel}（${diffLabel}）`,
+            grade,
+            score,
+            maxScore: questions.length,
+            durationSec: Math.max(1, Math.round(timeTaken / 1000)),
+            difficulty,
+            weakPoints,
+            questionItems,
+            summary: `完成 ${questions.length} 题，答对 ${score} 题（${diffLabel}难度）`,
+          }
+        ).catch((err) => {
+          console.warn('[MathGeniusApp] Failed to record activity:', err);
+          return null;
+        });
+      }
 
       // Stream feedback in background
       setIsFeedbackLoading(true);
@@ -131,6 +193,12 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
           if (run !== runRef.current) return;
           fullText += chunk;
           setStreamingFeedback(fullText);
+        }
+        if (user && fullText.trim() && activityPromise) {
+          const actId = await activityPromise;
+          if (actId) {
+            void updateStudentActivityFeedback(user, actId, fullText).catch(() => {});
+          }
         }
       } catch {
         if (run !== runRef.current) return;
@@ -143,7 +211,20 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         if (run === runRef.current) setIsFeedbackLoading(false);
       }
     },
-    [questions, startTime, language, selectedCategory, difficulty, profile]
+    [
+      questions,
+      startTime,
+      language,
+      selectedCategory,
+      difficulty,
+      profile,
+      user,
+      portalProfile,
+      resolvedName,
+      effectiveAvatarId,
+      recordMathGenius,
+      grade,
+    ]
   );
 
   const handleAnswer = useCallback(

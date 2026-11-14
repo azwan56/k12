@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, LogIn, LogOut, Pencil, Settings, X } from 'lucide-react';
+import { BarChart3, Check, ChevronDown, LogIn, LogOut, Pencil, Settings, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRewards } from '../hooks/useRewards';
 import { useProfile } from '../hooks/useProfile';
@@ -346,6 +346,14 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
               <div className="border-t-2 border-slate-100 pt-3 mt-3 flex flex-col gap-2">
                 {user ? (
                   <>
+                    <a
+                      href="#/parent"
+                      onClick={() => setProfileMenuOpen(false)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border-2 border-ink bg-violet-200 hover:bg-violet-300 text-sm font-extrabold text-ink transition-colors"
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      <span>👨‍👩‍👧 家长督学看板</span>
+                    </a>
                     <button
                       type="button"
                       onClick={() => {
@@ -388,15 +396,26 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
         </div>
 
         {user ? (
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="p-2 rounded-full hover:bg-white shrink-0"
-            aria-label="家长设置"
-            title="家长设置"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          <>
+            <a
+              href="#/parent"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full border-2 border-ink bg-violet-200 hover:bg-violet-300 text-xs font-black text-ink shrink-0 whitespace-nowrap"
+              aria-label="家长督学看板"
+              title="家长督学看板"
+            >
+              <span aria-hidden="true">👨‍👩‍👧</span>
+              <span className="hidden sm:inline">督学</span>
+            </a>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="p-2 rounded-full hover:bg-white shrink-0"
+              aria-label="家长设置"
+              title="家长设置"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </>
         ) : (
           <button
             type="button"

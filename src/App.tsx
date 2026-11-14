@@ -10,9 +10,12 @@ import HomePage from './k12/HomePage';
 import SubjectPage from './k12/SubjectPage';
 import PracticePage from './k12/PracticePage';
 import EssayPage from './k12/EssayPage';
+import StudentProgressSync from './k12/StudentProgressSync';
 
 const WordsmithApp = lazy(() => import('./apps/wordsmith/WordsmithApp'));
 const MathGeniusApp = lazy(() => import('./apps/mathgenius/MathGeniusApp'));
+const HumanityApp = lazy(() => import('./apps/humanity/HumanityApp'));
+const ParentDashboardPage = lazy(() => import('./k12/ParentDashboardPage'));
 
 function AppContent() {
   const { user, loading, generateCustomTokenAndRedirect } = useAuth();
@@ -51,7 +54,9 @@ function AppContent() {
   const track = route.query.get('t');
 
   let page: React.ReactNode;
-  if (subject && view === 'practice') {
+  if (section === 'parent') {
+    page = <ParentDashboardPage selectedStudentParam={route.query.get('student')} />;
+  } else if (subject && view === 'practice') {
     page = <PracticePage subject={subject} grade={grade} track={track} />;
   } else if (subject?.id === 'english' && view === 'wordsmith') {
     page = <WordsmithApp grade={grade} />;
@@ -59,6 +64,8 @@ function AppContent() {
     page = <MathGeniusApp grade={grade} />;
   } else if (subject?.id === 'english' && view === 'essay') {
     page = <EssayPage grade={grade} />;
+  } else if (subject?.id === 'humanity' && view === 'adventure') {
+    page = <HumanityApp grade={grade} />;
   } else if (subject) {
     page = <SubjectPage key={subject.id} subject={subject} grade={grade} initialTrack={track} />;
   } else {
@@ -79,6 +86,7 @@ export default function App() {
   return (
     <ProfileProvider>
       <RewardsProvider>
+        <StudentProgressSync />
         <AppContent />
       </RewardsProvider>
     </ProfileProvider>

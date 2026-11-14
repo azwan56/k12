@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X, RotateCcw } from 'lucide-react';
-import { Subject, GradeLevel } from '../data/k12Subjects';
+import { Subject, GradeLevel, gradeLabel } from '../data/k12Subjects';
+import { useAuth } from '../hooks/useAuth';
+import { useProfile } from '../hooks/useProfile';
 import { useRewards } from '../hooks/useRewards';
 import type { ActivityRewardOutcome } from './rewards';
 import RewardBanner from './RewardBanner';
+import type { QuestionReviewItem } from './studentProgress';
+import { recordStudentActivity } from './studentProgressService';
 import { THEME } from './ui';
 import { BackLink } from './SubjectPage';
 
@@ -49,6 +53,10 @@ export default function PracticePage({ subject, grade, track }: Props) {
   const [score, setScore] = useState(0);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
   const awardedRef = useRef(false);
+  const answersRef = useRef<QuestionReviewItem[]>([]);
+  const startedAtRef = useRef(Date.now());
+  const { user } = useAuth();
+  const { profile, resolvedName, effectiveAvatarId } = useProfile();
   const { recordPractice } = useRewards();
 
   const restart = () => {
@@ -57,6 +65,8 @@ export default function PracticePage({ subject, grade, track }: Props) {
     setScore(0);
     setRewardOutcome(null);
     awardedRef.current = false;
+    answersRef.current = [];
+    startedAtRef.current = Date.now();
   };
 
   useEffect(restart, [questions]);
@@ -66,9 +76,44 @@ export default function PracticePage({ subject, grade, track }: Props) {
   useEffect(() => {
     if (finished && !awardedRef.current) {
       awardedRef.current = true;
-      setRewardOutcome(recordPractice(score, questions.length));
+      const outcome = recordPractice(score, questions.length);
+      setRewardOutcome(outcome);
+      if (user) {
+        const durationSec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+        const accuracyPct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
+        void recordStudentActivity(
+          user,
+          { profile, resolvedName, effectiveAvatarId, rewards: outcome.nextState },
+          {
+            type: 'practice',
+            subjectId: subject.id,
+            title: `${subject.name} · ${gradeLabel(grade)}专题练习`,
+            grade,
+            score,
+            maxScore: questions.length,
+            accuracyPct,
+            durationSec,
+            summary: `完成 ${questions.length} 题，答对 ${score} 题（正确率 ${accuracyPct}%）`,
+            questionItems: answersRef.current,
+          }
+        ).catch((err) => {
+          console.warn('[PracticePage] Failed to record activity:', err);
+        });
+      }
     }
-  }, [finished, score, questions.length, recordPractice]);
+  }, [
+    finished,
+    score,
+    questions.length,
+    recordPractice,
+    user,
+    profile,
+    resolvedName,
+    effectiveAvatarId,
+    subject.id,
+    subject.name,
+    grade,
+  ]);
 
   if (questions.length === 0) {
     return (
@@ -112,6 +157,12 @@ export default function PracticePage({ subject, grade, track }: Props) {
     if (answered) return;
     setChosen(i);
     if (i === q.answer) setScore((s) => s + 1);
+    answersRef.current.push({
+      question: q.question,
+      userAnswer: q.options[i] ?? '',
+      correctAnswer: q.options[q.answer] ?? '',
+      isCorrect: i === q.answer,
+    });
   };
 
   const next = () => {

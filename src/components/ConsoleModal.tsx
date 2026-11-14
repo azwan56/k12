@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2, UserCheck } from 'lucide-react';
+import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2, UserCheck, BarChart3 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { isValidDiscordWebhookUrl } from '../lib/security';
 import { doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc } from 'firebase/firestore';
@@ -529,12 +529,29 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                         <div className="p-3 bg-violet-500 rounded-lg text-white shadow-md">
                                             <Users className="w-6 h-6" />
                                         </div>
-                                        <div>
-                                            <h3 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-zinc-900'}`}>
-                                                添加与管理学生 (Connected Students)
-                                            </h3>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <h3 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-zinc-900'}`}>
+                                                    添加与管理学生 (Connected Students)
+                                                </h3>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        onClose();
+                                                        window.location.hash = '#/parent';
+                                                    }}
+                                                    className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors ${
+                                                        isDarkMode
+                                                            ? 'bg-violet-500/20 border-violet-400/30 text-violet-300 hover:bg-violet-500/30'
+                                                            : 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
+                                                    }`}
+                                                >
+                                                    <BarChart3 className="w-3.5 h-3.5" />
+                                                    打开家长督学看板 →
+                                                </button>
+                                            </div>
                                             <p className={`text-sm mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                                由家长或教师直接输入孩子的 Vanpower / Google 登录邮箱添加绑定。添加后，孩子完成练习（Wordsmith / MathGenius）的战报将自动抄送至您上方配置的 Discord 频道。
+                                                由家长或教师直接输入孩子的 Vanpower / Google 登录邮箱添加绑定。绑定并完成学生登录授权后，您可在「家长督学看板」查看孩子完成的各科练习与进展，同时战报将自动抄送至您上方配置的 Discord 频道。
                                             </p>
                                         </div>
                                     </div>
@@ -643,6 +660,20 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                                     }`}>
                                                                     {student.studentUid ? '已同步资料' : '等待学生登录'}
                                                                 </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        onClose();
+                                                                        window.location.hash = `#/parent?student=${encodeURIComponent(student.studentEmail)}`;
+                                                                    }}
+                                                                    className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition-colors ${
+                                                                        isDarkMode
+                                                                            ? 'bg-violet-500/20 border-violet-400/30 text-violet-300 hover:bg-violet-500/30'
+                                                                            : 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100'
+                                                                    }`}
+                                                                >
+                                                                    📊 查看进展
+                                                                </button>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => void handleRemoveStudent(student.id)}

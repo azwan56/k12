@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import { ESSAY_PROMPTS, GradeLevel } from '../data/k12Subjects';
+import { useAuth } from '../hooks/useAuth';
+import { useProfile } from '../hooks/useProfile';
 import { useRewards } from '../hooks/useRewards';
 import type { ActivityRewardOutcome } from './rewards';
 import RewardBanner from './RewardBanner';
+import { recordStudentActivity } from './studentProgressService';
 import { BackLink } from './SubjectPage';
 
 export default function EssayPage({ grade }: { grade: GradeLevel }) {
@@ -14,7 +17,9 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
   const [draft, setDraft] = useState('');
   const [done, setDone] = useState(false);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
-  const { recordEssay } = useRewards();
+  const { user } = useAuth();
+  const { profile, resolvedName, effectiveAvatarId } = useProfile();
+  const { rewards, recordEssay } = useRewards();
 
   useEffect(() => {
     if (!prompts.some((p) => p.id === promptId)) setPromptId(prompts[0].id);
@@ -95,9 +100,31 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
           type="button"
           onClick={() => {
             setDone(true);
-            if (words >= min) {
-              const outcome = recordEssay(prompt.id);
-              if (outcome) setRewardOutcome(outcome);
+            const outcome = words >= min ? recordEssay(prompt.id) : null;
+            if (outcome) setRewardOutcome(outcome);
+            if (user && draft.trim().length > 0) {
+              void recordStudentActivity(
+                user,
+                {
+                  profile,
+                  resolvedName,
+                  effectiveAvatarId,
+                  rewards: outcome ? outcome.nextState : rewards,
+                },
+                {
+                  type: 'essay',
+                  subjectId: 'english',
+                  title: `命题作文 · ${prompt.genre}《${prompt.title}》`,
+                  grade,
+                  score: words,
+                  maxScore: min,
+                  accuracyPct: Math.min(100, Math.round((words / min) * 100)),
+                  summary: `完成作文《${prompt.title}》，共 ${words} 词（建议 ${min}–${max} 词）`,
+                  essayContent: draft.trim().slice(0, 4000),
+                }
+              ).catch((err) => {
+                console.warn('[EssayPage] Failed to record activity:', err);
+              });
             }
           }}
           disabled={words === 0}
@@ -109,9 +136,16 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
 
       <div aria-live="polite">
         {done && (
-          <p className="text-xl font-black mt-6">
-            {words < min ? '再多写一点，加个例子吧 ✏️' : words > max ? '有点长啦，试试删掉重复的句子 ✂️' : '字数刚刚好，真棒！🎉'}
-          </p>
+          <>
+            <p className="text-xl font-black mt-6">
+              {words < min ? '再多写一点，加个例子吧 ✏️' : words > max ? '有点长啦，试试删掉重复的句子 ✂️' : '字数刚刚好，真棒！🎉'}
+            </p>
+            {user && (
+              <p className="text-sm font-bold text-emerald-700 mt-2">
+                ✓ 已同步至学习档案，家长可在督学看板查看正文
+              </p>
+            )}
+          </>
         )}
       </div>
       <RewardBanner outcome={rewardOutcome} />
