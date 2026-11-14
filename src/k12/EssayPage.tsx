@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import { ESSAY_PROMPTS, GradeLevel } from '../data/k12Subjects';
+import { useRewards } from '../hooks/useRewards';
+import type { ActivityRewardOutcome } from './rewards';
+import RewardBanner from './RewardBanner';
 import { BackLink } from './SubjectPage';
 
 export default function EssayPage({ grade }: { grade: GradeLevel }) {
@@ -10,6 +13,8 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
 
   const [draft, setDraft] = useState('');
   const [done, setDone] = useState(false);
+  const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const { recordEssay } = useRewards();
 
   useEffect(() => {
     if (!prompts.some((p) => p.id === promptId)) setPromptId(prompts[0].id);
@@ -18,6 +23,7 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
   useEffect(() => {
     setDraft(localStorage.getItem(`k12_essay_${prompt.id}`) ?? '');
     setDone(false);
+    setRewardOutcome(null);
   }, [prompt.id]);
 
   const update = (value: string) => {
@@ -87,7 +93,13 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
         </span>
         <button
           type="button"
-          onClick={() => setDone(true)}
+          onClick={() => {
+            setDone(true);
+            if (words >= min) {
+              const outcome = recordEssay(prompt.id);
+              if (outcome) setRewardOutcome(outcome);
+            }
+          }}
           disabled={words === 0}
           className="chunky bg-yellow-300 px-6 py-3 text-lg font-black disabled:opacity-40"
         >
@@ -102,6 +114,7 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
           </p>
         )}
       </div>
+      <RewardBanner outcome={rewardOutcome} />
     </>
   );
 }

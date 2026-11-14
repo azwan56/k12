@@ -19,6 +19,8 @@ import { useAuth } from '../../../hooks/useAuth';
 import { db } from '../../../lib/firebase';
 import { sendToDiscord } from '../services/discordService';
 import { QuizResult, Question, UserAnswer, DIFFICULTY_CONFIGS } from '../types';
+import type { ActivityRewardOutcome } from '../../../k12/rewards';
+import RewardBanner from '../../../k12/RewardBanner';
 import { BackButton, DIFF_EMOJI } from './ui';
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
   questions: Question[];
   isFeedbackLoading: boolean;
   language: 'en' | 'zh';
+  rewardOutcome?: ActivityRewardOutcome | null;
   onRetry: () => void;
   onDone: () => void;
 }
@@ -81,7 +84,7 @@ function ReviewItem({ question, idx, ans }: { question: Question; idx: number; a
   );
 }
 
-export default function ResultScreen({ results, questions, isFeedbackLoading, language, onRetry, onDone }: Props) {
+export default function ResultScreen({ results, questions, isFeedbackLoading, language, rewardOutcome, onRetry, onDone }: Props) {
   const { user } = useAuth();
   const reportRef = useRef<HTMLDivElement>(null);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -243,6 +246,8 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
           </div>
           <p className="text-xs font-bold text-slate-600 mt-3">{results.date}</p>
         </div>
+
+        <RewardBanner outcome={rewardOutcome ?? null} />
 
         {/* AI feedback */}
         <div className="bg-white rounded-3xl border-[3px] border-ink p-5" aria-live="polite">

@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
+import { RewardsProvider } from './hooks/useRewards';
 import { getSubject } from './data/k12Subjects';
 import { useGrade, useHashRoute } from './k12/ui';
 import TopBar from './k12/TopBar';
@@ -54,11 +55,13 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-dvh flex flex-col font-sans">
-      <TopBar grade={grade} onGradeChange={setGrade} />
-      <main key={route.path.join('/')} className="page-enter flex-1 w-full max-w-3xl mx-auto px-5 pb-20">
-        <Suspense fallback={<p className="text-xl font-black mt-10">加载中…</p>}>{page}</Suspense>
-      </main>
-    </div>
+    <RewardsProvider>
+      <div className="min-h-dvh flex flex-col font-sans">
+        <TopBar grade={grade} onGradeChange={setGrade} />
+        <main key={route.path.join('/')} className="page-enter flex-1 w-full max-w-3xl mx-auto px-5 pb-20">
+          <Suspense fallback={<p className="text-xl font-black mt-10">加载中…</p>}>{page}</Suspense>
+        </main>
+      </div>
+    </RewardsProvider>
   );
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
+import { useRewards } from '../../hooks/useRewards';
+import type { ActivityRewardOutcome } from '../../k12/rewards';
 import { AppState, Question, UserAnswer, QuizResult, DifficultyLevel, StudentLearningProfile } from './types';
 import { generateMathQuestions, getFinalFeedbackStream } from './services/geminiService';
 import { getLearningProfile, saveLearningProfile, recordQuizCompletion } from './services/learningProfileService';
@@ -26,6 +28,8 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
   const [startTime, setStartTime] = useState<number>(0);
   const [streamingFeedback, setStreamingFeedback] = useState<string>('');
   const [isFeedbackLoading, setIsFeedbackLoading] = useState<boolean>(false);
+  const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const { recordMathGenius } = useRewards();
   // Bumped whenever the user leaves a run, so late async results are ignored.
   const runRef = useRef(0);
 
@@ -115,6 +119,7 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         levelRecommendation,
         weakPointsIdentified
       });
+      setRewardOutcome(recordMathGenius(score, questions.length));
       setState(AppState.RESULTS);
 
       // Stream feedback in background
@@ -208,6 +213,7 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
       <ResultScreen
         results={{ ...results, feedback: streamingFeedback }}
         questions={questions}
+        rewardOutcome={rewardOutcome}
         isFeedbackLoading={isFeedbackLoading}
         language={language}
         onRetry={() => startNewQuiz(selectedCategory)}

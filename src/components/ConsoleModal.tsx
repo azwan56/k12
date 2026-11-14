@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, MessageSquare, Loader2, Link2, Users } from 'lucide-react';
+import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { collection, doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc, updateDoc as firestoreUpdateDoc, query, where, getDocs } from 'firebase/firestore';
+import { useRewards } from '../hooks/useRewards';
 
 interface ConsoleModalProps {
     isOpen: boolean;
@@ -17,6 +18,10 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     const [isSaving, setIsSaving] = useState(false);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [connectedStudents, setConnectedStudents] = useState<any[]>([]);
+    const { rewards, resolveRedemption, addWish, removeWish } = useRewards();
+    const [newWishEmoji, setNewWishEmoji] = useState('🎁');
+    const [newWishTitle, setNewWishTitle] = useState('');
+    const [newWishCost, setNewWishCost] = useState('100');
 
     useEffect(() => {
         if (isOpen && auth.currentUser) {
@@ -310,6 +315,137 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                 <p className="text-xs mt-1">请让他们在自己的控制台中填写您的注册邮箱。</p>
                                             </div>
                                         )}
+                                    </div>
+                                </div>
+
+                                {/* Integration Card: Wish Redemption Store (Parent Management) */}
+                                <div className={`p-6 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-black/10'}`}>
+                                    <div className="flex items-start gap-4 mb-5">
+                                        <div className="p-3 bg-rose-500 rounded-lg text-white shadow-md">
+                                            <Gift className="w-6 h-6" />
+                                        </div>
+                                        <div>
+                                            <h3 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-zinc-900'}`}>
+                                                心愿兑换商店管理 (Wish Store)
+                                            </h3>
+                                            <p className={`text-sm mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                确认核销孩子申请的心愿兑换，或自定义奖励项目与所需能量币。
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Pending redemptions */}
+                                    {rewards.redemptions.filter((r) => r.status === 'pending').length > 0 && (
+                                        <div className="mb-5 space-y-2">
+                                            <p className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}>
+                                                待确认核销 ({rewards.redemptions.filter((r) => r.status === 'pending').length})
+                                            </p>
+                                            {rewards.redemptions
+                                                .filter((r) => r.status === 'pending')
+                                                .map((req) => (
+                                                    <div
+                                                        key={req.id}
+                                                        className={`flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border ${
+                                                            isDarkMode ? 'bg-zinc-900/70 border-amber-500/30' : 'bg-amber-50 border-amber-200'
+                                                        }`}
+                                                    >
+                                                        <div className="text-sm font-medium">
+                                                            <span className="mr-1.5">{req.emoji}</span>
+                                                            <span className={isDarkMode ? 'text-white' : 'text-zinc-900'}>{req.title}</span>
+                                                            <span className="ml-2 text-xs text-amber-700 font-bold">(-{req.cost} 币)</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => resolveRedemption(req.id, true)}
+                                                                className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg flex items-center gap-1"
+                                                            >
+                                                                <CheckCircle2 className="w-3.5 h-3.5" /> 确认核销
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => resolveRedemption(req.id, false)}
+                                                                className="px-3 py-1.5 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 text-xs font-bold rounded-lg"
+                                                            >
+                                                                退回能量币
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                        </div>
+                                    )}
+
+                                    {/* Existing wishes */}
+                                    <div className="space-y-2 mb-4">
+                                        {rewards.wishes.map((w) => (
+                                            <div
+                                                key={w.id}
+                                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border ${
+                                                    isDarkMode ? 'bg-zinc-900/50 border-white/10' : 'bg-white border-zinc-200'
+                                                }`}
+                                            >
+                                                <div className="text-sm font-medium">
+                                                    <span className="mr-2">{w.emoji}</span>
+                                                    <span className={isDarkMode ? 'text-zinc-100' : 'text-zinc-900'}>{w.title}</span>
+                                                    <span className="ml-2 text-xs font-bold text-amber-600">🪙 {w.cost} 币</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeWish(w.id)}
+                                                    aria-label={`删除 ${w.title}`}
+                                                    className="p-1.5 text-zinc-400 hover:text-rose-500 rounded-md"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Add wish form */}
+                                    <div className="flex flex-wrap sm:flex-nowrap gap-2">
+                                        <input
+                                            type="text"
+                                            value={newWishEmoji}
+                                            onChange={(e) => setNewWishEmoji(e.target.value)}
+                                            aria-label="心愿图标"
+                                            maxLength={4}
+                                            className={`w-14 text-center px-2 py-2 rounded-lg border text-sm ${
+                                                isDarkMode ? 'bg-zinc-950 border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
+                                            }`}
+                                        />
+                                        <input
+                                            type="text"
+                                            value={newWishTitle}
+                                            onChange={(e) => setNewWishTitle(e.target.value)}
+                                            placeholder="新增心愿（如：周末吃冰淇淋）"
+                                            className={`flex-1 min-w-[140px] px-3 py-2 rounded-lg border text-sm ${
+                                                isDarkMode ? 'bg-zinc-950 border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
+                                            }`}
+                                        />
+                                        <input
+                                            type="number"
+                                            min={10}
+                                            step={10}
+                                            value={newWishCost}
+                                            onChange={(e) => setNewWishCost(e.target.value)}
+                                            aria-label="所需能量币"
+                                            className={`w-24 px-3 py-2 rounded-lg border text-sm ${
+                                                isDarkMode ? 'bg-zinc-950 border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
+                                            }`}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const title = newWishTitle.trim();
+                                                const cost = Math.max(1, parseInt(newWishCost, 10) || 50);
+                                                if (!title) return;
+                                                addWish({ emoji: newWishEmoji.trim() || '🎁', title, cost });
+                                                setNewWishTitle('');
+                                            }}
+                                            className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold rounded-lg flex items-center gap-1 shrink-0"
+                                        >
+                                            <Plus className="w-4 h-4" /> 添加
+                                        </button>
                                     </div>
                                 </div>
                             </div>

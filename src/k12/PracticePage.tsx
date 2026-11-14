@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X, RotateCcw } from 'lucide-react';
 import { Subject, GradeLevel } from '../data/k12Subjects';
+import { useRewards } from '../hooks/useRewards';
+import type { ActivityRewardOutcome } from './rewards';
+import RewardBanner from './RewardBanner';
 import { THEME } from './ui';
 import { BackLink } from './SubjectPage';
 
@@ -44,14 +47,28 @@ export default function PracticePage({ subject, grade, track }: Props) {
   const [index, setIndex] = useState(0);
   const [chosen, setChosen] = useState<number | null>(null);
   const [score, setScore] = useState(0);
+  const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const awardedRef = useRef(false);
+  const { recordPractice } = useRewards();
 
   const restart = () => {
     setIndex(0);
     setChosen(null);
     setScore(0);
+    setRewardOutcome(null);
+    awardedRef.current = false;
   };
 
   useEffect(restart, [questions]);
+
+  const finished = questions.length > 0 && index >= questions.length;
+
+  useEffect(() => {
+    if (finished && !awardedRef.current) {
+      awardedRef.current = true;
+      setRewardOutcome(recordPractice(score, questions.length));
+    }
+  }, [finished, score, questions.length, recordPractice]);
 
   if (questions.length === 0) {
     return (
@@ -61,8 +78,6 @@ export default function PracticePage({ subject, grade, track }: Props) {
       </>
     );
   }
-
-  const finished = index >= questions.length;
 
   if (finished) {
     const perfect = score === questions.length;
@@ -76,6 +91,7 @@ export default function PracticePage({ subject, grade, track }: Props) {
           </p>
           <p className="text-xl font-bold mt-2">{perfect ? '全对，太棒了！' : '继续加油！'}</p>
         </div>
+        <RewardBanner outcome={rewardOutcome} />
         <div className="grid grid-cols-2 gap-4 mt-6">
           <button type="button" onClick={() => setRound((r) => r + 1)} className="chunky bg-white py-4 text-xl font-black flex items-center justify-center gap-2">
             <RotateCcw className="w-5 h-5" aria-hidden="true" /> 再来一次

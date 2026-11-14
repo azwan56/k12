@@ -4,6 +4,8 @@ import { toBlob } from 'html-to-image';
 import { Check, Download, Send, Share2, Star, X } from 'lucide-react';
 import { BatchResult, SessionRecord } from '../types';
 import { resolveReportTarget, sendReport, type ReportTarget } from '../services/reportService';
+import type { ActivityRewardOutcome } from '../../../k12/rewards';
+import RewardBanner from '../../../k12/RewardBanner';
 import { BackButton, Spinner, Stars } from './ui';
 
 interface Props {
@@ -12,12 +14,13 @@ interface Props {
   isCustomMode: boolean;
   user: User;
   userName: string;
+  rewardOutcome?: ActivityRewardOutcome | null;
   onRestart: () => void;
 }
 
 type SendStatus = 'idle' | 'sending' | 'success' | 'error';
 
-export default function BatchSummary({ results, history, isCustomMode, user, userName, onRestart }: Props) {
+export default function BatchSummary({ results, history, isCustomMode, user, userName, rewardOutcome, onRestart }: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
   const [target, setTarget] = useState<ReportTarget>(null);
   const [isSharing, setIsSharing] = useState(false);
@@ -152,6 +155,8 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
           WORDSMITH.VANPOWER.LIVE
         </p>
       </div>
+
+      <RewardBanner outcome={rewardOutcome ?? null} />
 
       {sendStatus !== 'idle' && (
         <p className="mt-4 flex items-center justify-center gap-2 font-extrabold" role="status">

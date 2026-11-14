@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { LogIn } from 'lucide-react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
+import { useRewards } from '../../hooks/useRewards';
+import type { ActivityRewardOutcome } from '../../k12/rewards';
 import { BackLink } from '../../k12/SubjectPage';
 import StartScreen from './components/StartScreen';
 import CustomWordInput from './components/CustomWordInput';
@@ -33,6 +35,8 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [currentEvaluation, setCurrentEvaluation] = useState<EvaluationResult | null>(null);
   const [currentSentence, setCurrentSentence] = useState('');
+  const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const { recordWordsmith } = useRewards();
 
   // Load this user's history on login / user change
   useEffect(() => {
@@ -131,6 +135,8 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
         };
         setHistory(saveSession(newSession));
       }
+      const totalStars = batchResults.reduce((acc, r) => acc + r.evaluation.score, 0);
+      setRewardOutcome(recordWordsmith(totalStars));
       setAppState('summary');
     }
   };
@@ -183,6 +189,7 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
         isCustomMode={isCustomMode}
         user={user}
         userName={userName}
+        rewardOutcome={rewardOutcome}
         onRestart={goToMenu}
       />
     );
