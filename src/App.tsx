@@ -1,9 +1,10 @@
 import React, { Suspense, lazy, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { RewardsProvider } from './hooks/useRewards';
-import { getSubject } from './data/k12Subjects';
+import { ProfileProvider, useProfile } from './hooks/useProfile';
+import { getSubject, type GradeLevel } from './data/k12Subjects';
 import { isAllowedVanpowerRedirectUrl } from './lib/security';
-import { useGrade, useHashRoute } from './k12/ui';
+import { useHashRoute } from './k12/ui';
 import TopBar from './k12/TopBar';
 import HomePage from './k12/HomePage';
 import SubjectPage from './k12/SubjectPage';
@@ -13,10 +14,14 @@ import EssayPage from './k12/EssayPage';
 const WordsmithApp = lazy(() => import('./apps/wordsmith/WordsmithApp'));
 const MathGeniusApp = lazy(() => import('./apps/mathgenius/MathGeniusApp'));
 
-export default function App() {
+function AppContent() {
   const { user, loading, generateCustomTokenAndRedirect } = useAuth();
   const route = useHashRoute();
-  const [grade, setGrade] = useGrade();
+  const { profile, updateProfile } = useProfile();
+  const grade = profile.grade;
+  const setGrade = (g: GradeLevel) => {
+    void updateProfile({ grade: g });
+  };
 
   // Cross-domain SSO bounce: other *.vanpower.live apps send users here to mint a token.
   useEffect(() => {
@@ -61,13 +66,21 @@ export default function App() {
   }
 
   return (
-    <RewardsProvider>
-      <div className="min-h-dvh flex flex-col font-sans">
-        <TopBar grade={grade} onGradeChange={setGrade} />
-        <main key={route.path.join('/')} className="page-enter flex-1 w-full max-w-3xl mx-auto px-5 pb-20">
-          <Suspense fallback={<p className="text-xl font-black mt-10">加载中…</p>}>{page}</Suspense>
-        </main>
-      </div>
-    </RewardsProvider>
+    <div className="min-h-dvh flex flex-col font-sans">
+      <TopBar grade={grade} onGradeChange={setGrade} />
+      <main key={route.path.join('/')} className="page-enter flex-1 w-full max-w-3xl mx-auto px-5 pb-20">
+        <Suspense fallback={<p className="text-xl font-black mt-10">加载中…</p>}>{page}</Suspense>
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ProfileProvider>
+      <RewardsProvider>
+        <AppContent />
+      </RewardsProvider>
+    </ProfileProvider>
   );
 }

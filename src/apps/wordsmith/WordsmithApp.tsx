@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { LogIn } from 'lucide-react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
+import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
 import type { ActivityRewardOutcome } from '../../k12/rewards';
 import { BackLink } from '../../k12/SubjectPage';
@@ -23,7 +24,10 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   void grade; // reserved for future grade-specific word banks
 
   const { user, loading: authLoading, signInWithGoogle } = useAuth();
-  const userName = user ? user.displayName?.split(' ')[0] || user.email?.split('@')[0] || 'Student' : '';
+  const { profile, resolvedName } = useProfile();
+  const userName = user
+    ? profile.displayName || user.displayName?.split(' ')[0] || resolvedName || 'Student'
+    : '';
 
   const [appState, setAppState] = useState<AppState>('menu');
   const [isCustomMode, setIsCustomMode] = useState(false);

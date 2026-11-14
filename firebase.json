@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "k12-vanpower",
     "public": "dist",
     "ignore": [
       "firebase.json",

@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2 } from 'lucide-react';
+import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2, UserCheck } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { isValidDiscordWebhookUrl } from '../lib/security';
-import { collection, doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc, updateDoc as firestoreUpdateDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc, query, where, getDocs } from 'firebase/firestore';
 import { useRewards } from '../hooks/useRewards';
+import { useProfile } from '../hooks/useProfile';
+import { useAuth } from '../hooks/useAuth';
+import { AVATAR_OPTIONS, MAX_DISPLAY_NAME_LENGTH, isValidAvatarId } from '../k12/profile';
+import UserAvatar from '../k12/UserAvatar';
+import type { GradeLevel } from '../data/k12Subjects';
 
 interface ConsoleModalProps {
     isOpen: boolean;
@@ -20,18 +25,24 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error' | 'invalid_webhook'>('idle');
     const [connectedStudents, setConnectedStudents] = useState<any[]>([]);
     const { rewards, resolveRedemption, addWish, removeWish } = useRewards();
+    const { user } = useAuth();
+    const { profile, resolvedName, effectiveAvatarId, updateProfile } = useProfile();
+    const [profileNameInput, setProfileNameInput] = useState(profile.displayName);
+    const [profileSaved, setProfileSaved] = useState(false);
     const [newWishEmoji, setNewWishEmoji] = useState('🎁');
     const [newWishTitle, setNewWishTitle] = useState('');
     const [newWishCost, setNewWishCost] = useState('100');
 
     useEffect(() => {
         if (!isOpen) return;
+        setProfileNameInput(profile.displayName);
+        setProfileSaved(false);
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose();
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, profile.displayName]);
 
     useEffect(() => {
         if (isOpen && auth.currentUser) {
@@ -111,6 +122,13 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
         }
     };
 
+    const handleSaveProfile = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        await updateProfile({ displayName: profileNameInput });
+        setProfileSaved(true);
+        setTimeout(() => setProfileSaved(false), 2500);
+    };
+
     const handleSave = async () => {
         if (!auth.currentUser) return;
         const trimmedWebhook = webhookUrl.trim();
@@ -123,10 +141,17 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
 
         try {
             const userRef = firestoreDoc(db, 'users', auth.currentUser.uid);
-            await firestoreUpdateDoc(userRef, {
-                discordWebhookUrl: trimmedWebhook,
-                guardianEmail: guardianEmail.trim()
-            });
+            await firestoreSetDoc(
+                userRef,
+                {
+                    uid: auth.currentUser.uid,
+                    email: auth.currentUser.email ?? null,
+                    name: resolvedName,
+                    discordWebhookUrl: trimmedWebhook,
+                    guardianEmail: guardianEmail.trim(),
+                },
+                { merge: true }
+            );
             setWebhookUrl(trimmedWebhook);
             setSaveStatus('success');
             setTimeout(() => setSaveStatus('idle'), 3000);
@@ -184,6 +209,151 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                             </div>
                         ) : (
                             <div className="space-y-8">
+                                {/* Portal Profile Maintenance Card */}
+                                <div className={`p-6 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-black/10'}`}>
+                                    <div className="flex items-start gap-4 mb-5">
+                                        <UserAvatar
+                                            avatarId={effectiveAvatarId}
+                                            photoURL={user?.photoURL || auth.currentUser?.photoURL}
+                                            displayName={resolvedName}
+                                            size="lg"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <h3 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-zinc-900'}`}>
+                                                    门户个人资料 (Portal Profile)
+                                                </h3>
+                                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isDarkMode ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'}`}>
+                                                    {profile.grade === 'G6' ? '6 年级' : '7 年级'}
+                                                </span>
+                                            </div>
+                                            <p className={`text-sm mt-1 truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                当前显示：<span className={`font-semibold ${isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}`}>{resolvedName}</span>
+                                                {(user?.email || auth.currentUser?.email) ? ` · ${user?.email || auth.currentUser?.email}` : ''}
+                                            </p>
+                                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                                                头像与昵称将自动同步到顶部导航栏、家长监督绑定列表以及学习周报/Discord 战报。
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-5">
+                                        {/* Nickname form */}
+                                        <form onSubmit={handleSaveProfile} className="space-y-2">
+                                            <label className={`block text-sm font-medium ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                                                学生昵称 (Display Name)
+                                            </label>
+                                            <div className="flex flex-col sm:flex-row gap-3">
+                                                <input
+                                                    type="text"
+                                                    value={profileNameInput}
+                                                    maxLength={MAX_DISPLAY_NAME_LENGTH}
+                                                    onChange={(e) => setProfileNameInput(e.target.value)}
+                                                    placeholder={`留空将使用账号名（${user?.displayName || auth.currentUser?.displayName || resolvedName}）`}
+                                                    className={`flex-1 px-4 py-2.5 rounded-lg border focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all ${isDarkMode
+                                                        ? 'bg-zinc-950 border-white/10 text-white placeholder-zinc-600'
+                                                        : 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400'
+                                                        }`}
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 min-w-[120px]"
+                                                >
+                                                    <UserCheck className="w-4 h-4" />
+                                                    保存昵称
+                                                </button>
+                                            </div>
+                                            {profileSaved && (
+                                                <p className="text-emerald-500 text-sm flex items-center gap-1 mt-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                                    个人资料已更新并同步云端！
+                                                </p>
+                                            )}
+                                        </form>
+
+                                        {/* Avatar Picker */}
+                                        <div className="space-y-2">
+                                            <label className={`block text-sm font-medium ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                                                顶部展示头像
+                                            </label>
+                                            <div className="flex flex-wrap items-center gap-2.5">
+                                                {(user?.photoURL || auth.currentUser?.photoURL) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void updateProfile({ avatarId: 'google' })}
+                                                        aria-pressed={effectiveAvatarId === 'google'}
+                                                        title="Google 账号头像"
+                                                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${effectiveAvatarId === 'google'
+                                                            ? isDarkMode
+                                                                ? 'border-amber-400 bg-amber-500/20 text-white'
+                                                                : 'border-zinc-900 bg-amber-100 text-zinc-900 shadow-sm'
+                                                            : isDarkMode
+                                                                ? 'border-white/10 bg-zinc-950 text-zinc-300 hover:border-white/30'
+                                                                : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400'
+                                                            }`}
+                                                    >
+                                                        <UserAvatar
+                                                            avatarId="google"
+                                                            photoURL={user?.photoURL || auth.currentUser?.photoURL}
+                                                            displayName={resolvedName}
+                                                            size="xs"
+                                                        />
+                                                        <span>Google 头像</span>
+                                                    </button>
+                                                )}
+                                                {AVATAR_OPTIONS.map((opt) => {
+                                                    const selected = effectiveAvatarId === opt.id;
+                                                    return (
+                                                        <button
+                                                            key={opt.id}
+                                                            type="button"
+                                                            onClick={() => void updateProfile({ avatarId: opt.id })}
+                                                            aria-pressed={selected}
+                                                            title={opt.label}
+                                                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${selected
+                                                                ? isDarkMode
+                                                                    ? 'border-amber-400 bg-amber-500/20 text-white'
+                                                                    : 'border-zinc-900 bg-amber-100 text-zinc-900 shadow-sm'
+                                                                : isDarkMode
+                                                                    ? 'border-white/10 bg-zinc-950 text-zinc-300 hover:border-white/30'
+                                                                    : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400'
+                                                                }`}
+                                                        >
+                                                            <UserAvatar avatarId={opt.id} size="xs" />
+                                                            <span>{opt.label}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Grade Quick Switch */}
+                                        <div className="flex items-center justify-between flex-wrap gap-3 pt-1">
+                                            <span className={`text-sm font-medium ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                                                默认学习年级
+                                            </span>
+                                            <div className={`inline-flex rounded-lg border p-1 ${isDarkMode ? 'bg-zinc-950 border-white/10' : 'bg-white border-zinc-200'}`}>
+                                                {(['G6', 'G7'] as GradeLevel[]).map((g) => (
+                                                    <button
+                                                        key={g}
+                                                        type="button"
+                                                        aria-pressed={profile.grade === g}
+                                                        onClick={() => void updateProfile({ grade: g })}
+                                                        className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${profile.grade === g
+                                                            ? 'bg-zinc-900 text-white'
+                                                            : isDarkMode
+                                                                ? 'text-zinc-400 hover:text-white'
+                                                                : 'text-zinc-600 hover:bg-zinc-100'
+                                                            }`}
+                                                    >
+                                                        {g === 'G6' ? '6 年级' : '7 年级'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* Integration Card: Discord Webhook */}
                                 <div className={`p-6 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-black/10'
                                     }`}>
@@ -315,21 +485,36 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                     <div className="space-y-3">
                                         {connectedStudents.length > 0 ? (
                                             <div className="grid gap-3">
-                                                {connectedStudents.map((student) => (
+                                                {connectedStudents.map((student) => {
+                                                    const studentAvatarId = isValidAvatarId(student.k12Profile?.avatarId)
+                                                        ? student.k12Profile.avatarId
+                                                        : student.photoURL
+                                                            ? 'google'
+                                                            : 'owl';
+                                                    return (
                                                     <div key={student.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg border ${isDarkMode ? 'bg-zinc-900/50 border-white/5' : 'bg-white border-zinc-200'}`}>
-                                                        <div>
-                                                            <div className={`font-medium ${isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}`}>
-                                                                {student.name || 'Unknown User'}
-                                                            </div>
-                                                            <div className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                                                {student.email}
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            <UserAvatar
+                                                                avatarId={studentAvatarId}
+                                                                photoURL={student.photoURL}
+                                                                displayName={student.name || 'Student'}
+                                                                size="sm"
+                                                            />
+                                                            <div className="min-w-0">
+                                                                <div className={`font-medium truncate ${isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}`}>
+                                                                    {student.name || 'Unknown User'}
+                                                                </div>
+                                                                <div className={`text-sm truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                                    {student.email}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                        <div className={`mt-2 sm:mt-0 text-xs px-2.5 py-1 rounded-full border w-fit ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-green-50 border-green-200 text-green-600'}`}>
+                                                        <div className={`mt-2 sm:mt-0 text-xs px-2.5 py-1 rounded-full border w-fit shrink-0 ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-green-50 border-green-200 text-green-600'}`}>
                                                             Linked
                                                         </div>
                                                     </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         ) : (
                                             <div className={`text-center py-8 rounded-lg border border-dashed ${isDarkMode ? 'border-white/10 text-zinc-500 bg-zinc-900/50' : 'border-zinc-300 text-zinc-400 bg-white/50'}`}>
