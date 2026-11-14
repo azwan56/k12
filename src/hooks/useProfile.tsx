@@ -20,6 +20,10 @@ import {
   sanitizeProfile,
   saveLocalProfile,
 } from '../k12/profile';
+import {
+  syncParentLinksMetadata,
+  syncStudentLinksProfile,
+} from '../k12/guardianLinkService';
 
 export type ProfilePatch = Partial<Pick<PortalProfile, 'displayName' | 'avatarId' | 'grade'>>;
 
@@ -120,6 +124,17 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (!cancelled) {
           syncedUidRef.current = user.uid;
+          const syncedName = resolveProfileName(merged, user, 'User');
+          const syncedAvatar = resolveAvatarId(
+            merged.updatedAt === 0 && user.photoURL && merged.avatarId === 'owl'
+              ? 'google'
+              : merged.avatarId,
+            user.photoURL
+          );
+          void syncStudentLinksProfile(user, {
+            displayName: syncedName,
+            avatarId: syncedAvatar,
+          }).catch(() => {});
         }
       } catch (err) {
         console.warn('[useProfile] Failed to sync profile with Firestore:', err);
@@ -154,6 +169,15 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!user?.uid) return;
       try {
         await persistRemoteProfile(next, user, false);
+        const syncedName = resolveProfileName(next, user, 'User');
+        const syncedAvatar = resolveAvatarId(next.avatarId, user.photoURL);
+        void syncStudentLinksProfile(user, {
+          displayName: syncedName,
+          avatarId: syncedAvatar,
+        }).catch(() => {});
+        void syncParentLinksMetadata(user.uid, {
+          parentName: syncedName,
+        }).catch(() => {});
       } catch (err) {
         console.warn('[useProfile] Failed to save profile to Firestore:', err);
       }

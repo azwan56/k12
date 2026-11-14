@@ -1,0 +1,231 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: shared_vocabulary (existing live rule preserved)
+    // Document ID: {docId}
+    // Access: Any authenticated user can read and write.
+    //
+    // Collection: shared_vocabulary_batches (existing live rule preserved)
+    // Document ID: {batchId}
+    // Access: Any authenticated user can read and write.
+    //
+    // Collection: users (existing live rule preserved)
+    // Document ID: {userId} (Firebase Auth UID) and nested documents
+    // Access: Strictly scoped to the owning authenticated user (uid == userId).
+    //
+    // Collection: guardian_links
+    // Document ID: {linkId} (deterministic `${parentUid}__${encodedEmail}`, <= 384 chars on create)
+    // Fields:
+    //   - parentUid: string (required, immutable, == request.auth.uid on create, 1..128 chars)
+    //   - parentEmail: string (required, immutable, non-empty lowercase email, <= 254 chars, == request.auth.token.email.lower() on create)
+    //   - parentName: string (required, parent-mutable, <= 64 chars)
+    //   - studentEmail: string (required, immutable, non-empty lowercase email, <= 254 chars, != parentEmail)
+    //   - discordWebhookUrl: string (required, parent-mutable, "" or HTTPS Discord webhook URL, <= 300 chars)
+    //   - createdAt: int (required, immutable, > 0)
+    //   - updatedAt: int (required, mutable by parent or verified student, > 0)
+    //   - studentUid: string | null (optional, omitted or null on create; student-mutable, == request.auth.uid on student update, <= 128 chars)
+    //   - studentName: string (optional, student-mutable, <= 64 chars)
+    //   - studentAvatarId: string (optional, student-mutable, <= 32 chars)
+    //   - studentPhotoURL: string | null (optional, student-mutable, null, "", or https:// URL, <= 512 chars)
+    //
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the caller has a non-empty verified email claim
+    function hasVerifiedEmail() {
+      return isAuthenticated() &&
+        'email' in request.auth.token &&
+        request.auth.token.email is string &&
+        request.auth.token.email.size() > 0 &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Return the caller's normalized lowercase email (requires hasVerifiedEmail() first)
+    function authEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    // Validate that immutable fields have not changed on update
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Validate non-empty lowercase email format (<= 254 chars)
+    function isValidLowerEmail(email) {
+      return email is string &&
+        email.size() > 0 &&
+        email.size() <= 254 &&
+        email == email.lower() &&
+        email.matches("^[a-z0-9._%+-]+@(?:[a-z0-9-]+\\.)+[a-z][a-z0-9-]{1,}$");
+    }
+
+    // Validate Discord webhook URL ("" or official HTTPS Discord webhook endpoint, <= 300 chars)
+    function isValidDiscordWebhookUrl(url) {
+      return url is string &&
+        url.size() <= 300 &&
+        (
+          url == "" ||
+          url.matches("^https://(discord\\.com|discordapp\\.com|ptb\\.discord\\.com|canary\\.discord\\.com)/api/(?:v[0-9]+/)?webhooks/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)?(?:\\?[A-Za-z0-9_=&-]+)?$")
+        );
+    }
+
+    // Validate optional studentPhotoURL (absent, null, "", or HTTPS URL <= 512 chars)
+    function isValidOptionalStudentPhotoUrl(data) {
+      return !('studentPhotoURL' in data) ||
+        data.studentPhotoURL == null ||
+        (
+          data.studentPhotoURL is string &&
+          data.studentPhotoURL.size() <= 512 &&
+          (
+            data.studentPhotoURL == "" ||
+            data.studentPhotoURL.matches("^https://[A-Za-z0-9.-]+\\.[A-Za-z][A-Za-z0-9-]{1,}(?::[0-9]{1,5})?(?:/[^\\s<>\"']*)?$")
+          )
+        );
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidGuardianLink(data) {
+      return data.keys().hasOnly([
+          'parentUid',
+          'parentEmail',
+          'parentName',
+          'studentEmail',
+          'discordWebhookUrl',
+          'createdAt',
+          'updatedAt',
+          'studentUid',
+          'studentName',
+          'studentAvatarId',
+          'studentPhotoURL'
+        ]) &&
+        data.keys().hasAll([
+          'parentUid',
+          'parentEmail',
+          'parentName',
+          'studentEmail',
+          'discordWebhookUrl',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.parentUid is string &&
+        data.parentUid.size() > 0 &&
+        data.parentUid.size() <= 128 &&
+        isValidLowerEmail(data.parentEmail) &&
+        data.parentName is string &&
+        data.parentName.size() <= 64 &&
+        isValidLowerEmail(data.studentEmail) &&
+        data.studentEmail != data.parentEmail &&
+        isValidDiscordWebhookUrl(data.discordWebhookUrl) &&
+        data.createdAt is int &&
+        data.createdAt > 0 &&
+        data.updatedAt is int &&
+        data.updatedAt > 0 &&
+        (!('studentUid' in data) || data.studentUid == null || (data.studentUid is string && data.studentUid.size() > 0 && data.studentUid.size() <= 128)) &&
+        (!('studentName' in data) || (data.studentName is string && data.studentName.size() <= 64)) &&
+        (!('studentAvatarId' in data) || (data.studentAvatarId is string && data.studentAvatarId.size() <= 32)) &&
+        isValidOptionalStudentPhotoUrl(data);
+    }
+
+    function isGuardianLinkParent() {
+      return isAuthenticated() &&
+        resource.data.parentUid == request.auth.uid;
+    }
+
+    function isGuardianLinkStudent() {
+      return hasVerifiedEmail() &&
+        resource.data.studentEmail == authEmailLower();
+    }
+
+    function isValidGuardianLinkParentUpdate() {
+      return isGuardianLinkParent() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'parentName',
+          'discordWebhookUrl',
+          'updatedAt'
+        ]) &&
+        areImmutableFieldsUnchanged([
+          'parentUid',
+          'parentEmail',
+          'studentEmail',
+          'createdAt'
+        ]);
+    }
+
+    function isValidGuardianLinkStudentUpdate() {
+      return isGuardianLinkStudent() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'studentUid',
+          'studentName',
+          'studentAvatarId',
+          'studentPhotoURL',
+          'updatedAt'
+        ]) &&
+        areImmutableFieldsUnchanged([
+          'parentUid',
+          'parentEmail',
+          'parentName',
+          'studentEmail',
+          'discordWebhookUrl',
+          'createdAt'
+        ]) &&
+        'studentUid' in request.resource.data &&
+        request.resource.data.studentUid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Default deny fallback
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 允许任何已登录的用户读取和添加共享词库
+    match /shared_vocabulary/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /shared_vocabulary_batches/{batchId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // 允许用户访问并更新自己的练习记录
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Parent-initiated guardian/student linking without exposing /users/{uid} cross-account
+    match /guardian_links/{linkId} {
+      allow read: if isGuardianLinkParent() || isGuardianLinkStudent();
+
+      allow create: if hasVerifiedEmail() &&
+        linkId.size() > 0 &&
+        linkId.size() <= 384 &&
+        isValidGuardianLink(request.resource.data) &&
+        request.resource.data.parentUid == request.auth.uid &&
+        request.resource.data.parentEmail == authEmailLower() &&
+        (!('studentUid' in request.resource.data) || request.resource.data.studentUid == null);
+
+      allow update: if isValidGuardianLink(request.resource.data) &&
+        (isValidGuardianLinkParentUpdate() || isValidGuardianLinkStudentUpdate());
+
+      allow delete: if isGuardianLinkParent() || isGuardianLinkStudent();
+    }
+  }
+}

@@ -14,10 +14,9 @@ import {
   Timer
 } from 'lucide-react';
 import { toCanvas } from 'html-to-image';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../../../hooks/useAuth';
-import { db } from '../../../lib/firebase';
 import { sendToDiscord } from '../services/discordService';
+import { resolvePortalReportTargets } from '../../../k12/guardianLinkService';
 import { QuizResult, Question, UserAnswer, DIFFICULTY_CONFIGS } from '../types';
 import type { ActivityRewardOutcome } from '../../../k12/rewards';
 import RewardBanner from '../../../k12/RewardBanner';
@@ -134,9 +133,9 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
     const autoSendReport = async () => {
       setReportStatus('sending');
       try {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        const profile = userDoc.exists() ? userDoc.data() : null;
-        if (!profile || (!profile.discordWebhookUrl && !profile.guardianEmail)) {
+        const fallbackName = user.email?.split('@')[0] || 'Unknown Student';
+        const { targets, senderName } = await resolvePortalReportTargets(user, fallbackName);
+        if (targets.length === 0) {
           setReportStatus('idle');
           return;
         }
@@ -150,29 +149,19 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
         if (!blob) throw new Error('Blob conversion failed');
 
-        let targetWebhookUrl = profile.discordWebhookUrl;
-        let senderName = profile.name || user.email?.split('@')[0] || 'Unknown Student';
-
-        if (profile.guardianEmail) {
-          const q = query(collection(db, 'users'), where('email', '==', profile.guardianEmail));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            const guardianData = snap.docs[0].data();
-            if (guardianData.discordWebhookUrl) {
-              targetWebhookUrl = guardianData.discordWebhookUrl;
-              senderName = `${senderName} (Student Link)`;
-            } else if (!targetWebhookUrl) {
-              throw new Error('Guardian found, but they have no Discord Webhook setup.');
-            }
-          } else if (!targetWebhookUrl) {
-            throw new Error('Guardian email not found in Vanpower system.');
-          }
+        const outcomes = await Promise.all(
+          targets.map((target) =>
+            sendToDiscord(
+              target.webhookUrl,
+              blob,
+              target.isGuardian ? `${senderName} (Student Link)` : senderName
+            )
+          )
+        );
+        const firstSuccess = outcomes.some((o) => o.success);
+        if (!firstSuccess) {
+          throw new Error(outcomes[0]?.error || 'Unknown error');
         }
-
-        if (!targetWebhookUrl) throw new Error('No valid webhook found.');
-
-        const result = await sendToDiscord(targetWebhookUrl, blob, senderName);
-        if (!result.success) throw new Error(result.error || 'Unknown error');
         setReportStatus('success');
       } catch (e: any) {
         console.error('Webhook processing error:', e);
