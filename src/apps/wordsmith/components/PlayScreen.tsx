@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send } from 'lucide-react';
 import { WordChallenge } from '../types';
+import { validateSentenceSubmission } from '../wordsmithRules';
 import { BackButton, Spinner } from './ui';
 
 interface Props {
@@ -34,10 +35,18 @@ export function Progress({ index, total }: { index: number; total: number }) {
 
 export default function PlayScreen({ challenge, index, total, isEvaluating, onSubmit, onQuit }: Props) {
   const [text, setText] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
   const isError = challenge.partOfSpeech === 'error';
 
   const submit = () => {
-    if (text.trim() && !isEvaluating) onSubmit(text);
+    if (isEvaluating) return;
+    const check = validateSentenceSubmission(challenge.word, text);
+    if ('reason' in check) {
+      setValidationError(check.reason);
+      return;
+    }
+    setValidationError(null);
+    onSubmit(check.sentence);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -80,12 +89,22 @@ export default function PlayScreen({ challenge, index, total, isEvaluating, onSu
         <textarea
           id="ws-sentence"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (validationError) setValidationError(null);
+          }}
           onKeyDown={handleKeyDown}
           disabled={isEvaluating}
           placeholder="Write your sentence here..."
-          className="w-full h-32 p-5 border-[3px] border-ink rounded-3xl bg-white text-xl font-bold resize-none placeholder:text-slate-400 disabled:opacity-60"
+          className={`w-full h-32 p-5 border-[3px] rounded-3xl bg-white text-xl font-bold resize-none placeholder:text-slate-400 disabled:opacity-60 ${
+            validationError ? 'border-red-600' : 'border-ink'
+          }`}
         />
+        {validationError && (
+          <p role="alert" className="mt-2 px-2 text-sm font-extrabold text-red-700">
+            {validationError}
+          </p>
+        )}
         <button
           type="submit"
           disabled={!text.trim() || isEvaluating}

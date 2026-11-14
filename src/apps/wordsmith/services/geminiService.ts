@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../../lib/firebase";
 import { WordChallenge, EvaluationResult } from "../types";
+import { createEvaluationFallback, normalizeEvaluationResult } from "../wordsmithRules";
 
 /**
  * Expanded WORD_BANK to 500 words for 10-12 year olds.
@@ -656,17 +657,10 @@ export const createCustomBatch = async (words: string[]): Promise<WordChallenge[
 export const evaluateSentence = async (word: string, sentence: string): Promise<EvaluationResult> => {
   try {
     const evaluate = httpsCallable(functions, 'evaluateWordsmithSentence', { timeout: 60000 });
-    const result = await evaluate({ word, sentence }) as { data: EvaluationResult };
-    return result.data;
+    const result = await evaluate({ word, sentence }) as { data: unknown };
+    return normalizeEvaluationResult(result.data);
   } catch (error) {
     console.error("Evaluation error:", error);
-    return {
-      score: 3,
-      feedback: "暂时未能连接评分服务，已先记录你的句子，稍后可重试。",
-      betterExamples: [
-        `She showed a ${word} attitude when helping her classmates.`,
-        `We practiced using "${word}" naturally in our writing today.`
-      ]
-    };
+    return createEvaluationFallback();
   }
 };

@@ -1,6 +1,6 @@
-import { ArrowRight, Check, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, RotateCcw } from 'lucide-react';
 import { EvaluationResult, WordChallenge } from '../types';
-import { BackButton, Stars, scoreLabel } from './ui';
+import { BackButton, Spinner, Stars, scoreLabel } from './ui';
 import { Progress } from './PlayScreen';
 
 interface Props {
@@ -10,12 +10,26 @@ interface Props {
   index: number; // 1-based
   total: number;
   isLastWord: boolean;
+  isRetrying?: boolean;
+  onRetry?: () => void;
   onNext: () => void;
   onQuit: () => void;
 }
 
-export default function FeedbackScreen({ challenge, result, userSentence, index, total, isLastWord, onNext, onQuit }: Props) {
-  const good = result.score >= 3;
+export default function FeedbackScreen({
+  challenge,
+  result,
+  userSentence,
+  index,
+  total,
+  isLastWord,
+  isRetrying = false,
+  onRetry,
+  onNext,
+  onQuit
+}: Props) {
+  const isFallback = Boolean(result.isFallback);
+  const good = !isFallback && result.score >= 3;
   const Icon = good ? Check : RotateCcw;
 
   return (
@@ -25,26 +39,35 @@ export default function FeedbackScreen({ challenge, result, userSentence, index,
 
       <div className="chunky bg-white mt-6 p-6 text-center" role="status">
         <p className="font-extrabold text-rose-800">{challenge.word}</p>
-        <div className="mt-2">
-          <Stars score={result.score} size="lg" />
-        </div>
-        <p className="text-3xl font-black mt-2 flex items-center justify-center gap-2">
-          <Icon className="w-8 h-8" strokeWidth={3} aria-hidden="true" />
-          {scoreLabel(result.score)}
-          <span className="text-xl text-slate-600 tabular-nums">{result.score}/5</span>
-        </p>
+        {isFallback ? (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <AlertTriangle className="w-10 h-10 text-amber-600" strokeWidth={2.5} aria-hidden="true" />
+            <p className="text-2xl font-black text-amber-800">评分服务暂未连通</p>
+          </div>
+        ) : (
+          <>
+            <div className="mt-2">
+              <Stars score={result.score} size="lg" />
+            </div>
+            <p className="text-3xl font-black mt-2 flex items-center justify-center gap-2">
+              <Icon className="w-8 h-8" strokeWidth={3} aria-hidden="true" />
+              {scoreLabel(result.score)}
+              <span className="text-xl text-slate-600 tabular-nums">{result.score}/5</span>
+            </p>
+          </>
+        )}
         <p className="text-lg font-bold mt-4 italic text-slate-700">"{userSentence}"</p>
         <p className="text-lg font-bold mt-4">{result.feedback}</p>
       </div>
 
-      {result.correction && (
+      {!isFallback && result.correction && (
         <div className="mt-5 p-5 rounded-3xl border-[3px] border-ink bg-amber-100">
           <p className="text-sm font-black text-amber-800">改一改</p>
           <p className="text-lg font-bold mt-1">"{result.correction}"</p>
         </div>
       )}
 
-      {result.betterExamples?.length > 0 && (
+      {!isFallback && result.betterExamples?.length > 0 && (
         <div className="mt-5 p-5 rounded-3xl border-[3px] border-ink bg-rose-100">
           <p className="text-sm font-black text-rose-800">参考例句</p>
           <ol className="mt-2 space-y-2">
@@ -60,15 +83,46 @@ export default function FeedbackScreen({ challenge, result, userSentence, index,
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={onNext}
-        autoFocus
-        className="chunky bg-yellow-300 w-full mt-6 py-4 text-xl font-black flex items-center justify-center gap-2"
-      >
-        {isLastWord ? '查看成绩' : '下一个'}
-        <ArrowRight className="w-6 h-6" aria-hidden="true" />
-      </button>
+      {isFallback && onRetry ? (
+        <div className="grid gap-3 mt-6">
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={isRetrying}
+            autoFocus
+            className="chunky bg-yellow-300 w-full py-4 text-xl font-black flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {isRetrying ? (
+              <>
+                <Spinner /> 重新评分中…
+              </>
+            ) : (
+              <>
+                <RotateCcw className="w-5 h-5" aria-hidden="true" /> 重新评分
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={isRetrying}
+            className="chunky bg-white w-full py-3.5 text-lg font-black flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            {isLastWord ? '跳过并查看成绩' : '先跳过，下一个'}
+            <ArrowRight className="w-5 h-5" aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onNext}
+          autoFocus
+          className="chunky bg-yellow-300 w-full mt-6 py-4 text-xl font-black flex items-center justify-center gap-2"
+        >
+          {isLastWord ? '查看成绩' : '下一个'}
+          <ArrowRight className="w-6 h-6" aria-hidden="true" />
+        </button>
+      )}
     </>
   );
 }

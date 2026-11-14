@@ -6,10 +6,11 @@ export interface WordChallenge {
 }
 
 export interface EvaluationResult {
-  score: number; // 1 to 5
+  score: number; // 1 to 5 (0 when service unavailable fallback)
   feedback: string;
   correction?: string; // Optional corrected sentence if grammar was wrong
-  betterExamples: string[]; // 2 examples
+  betterExamples: string[]; // 2 examples (empty when fallback)
+  isFallback?: boolean;
 }
 
 export interface BatchResult {

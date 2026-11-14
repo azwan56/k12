@@ -26,8 +26,9 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
   const [isSharing, setIsSharing] = useState(false);
   const [sendStatus, setSendStatus] = useState<SendStatus>('idle');
 
-  const total = results.reduce((acc, r) => acc + r.evaluation.score, 0);
-  const max = results.length * 5;
+  const scoredResults = results.filter((r) => !r.evaluation.isFallback);
+  const total = scoredResults.reduce((acc, r) => acc + r.evaluation.score, 0);
+  const max = scoredResults.length * 5;
   // history already includes this session (saved before showing the summary)
   const allTimeWords = history.reduce((acc, s) => acc + s.results.length, 0);
   const allTimeStars = history.reduce(
@@ -126,11 +127,15 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
             {isCustomMode ? '自定义词汇' : `${results.length} 个新词`} · {userName}
           </p>
           <h1 className="text-3xl font-black mt-1">练习完成！</h1>
-          <p className="text-5xl font-black mt-4 flex items-center justify-center gap-2 tabular-nums">
-            <Star className="w-10 h-10 fill-yellow-300 text-ink" strokeWidth={2.5} aria-hidden="true" />
-            {total}
-            <span className="text-2xl text-slate-600">/ {max}</span>
-          </p>
+          {max > 0 ? (
+            <p className="text-5xl font-black mt-4 flex items-center justify-center gap-2 tabular-nums">
+              <Star className="w-10 h-10 fill-yellow-300 text-ink" strokeWidth={2.5} aria-hidden="true" />
+              {total}
+              <span className="text-2xl text-slate-600">/ {max}</span>
+            </p>
+          ) : (
+            <p className="text-xl font-black mt-4 text-amber-800">本次暂无有效评分</p>
+          )}
           <p className="text-sm font-extrabold text-slate-600 mt-2">
             累计 {history.length} 组 · {allTimeWords} 个词 · {allTimeStars} 星
           </p>
@@ -141,7 +146,13 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
             <li key={i} className="rounded-2xl bg-rose-100 p-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span className="font-black text-lg">{r.wordChallenge.word}</span>
-                <Stars score={r.evaluation.score} size="sm" />
+                {r.evaluation.isFallback ? (
+                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-amber-100 border-2 border-ink text-amber-900">
+                    未评分
+                  </span>
+                ) : (
+                  <Stars score={r.evaluation.score} size="sm" />
+                )}
               </div>
               <p className="font-bold mt-1 text-slate-700">"{r.userSentence}"</p>
               {r.evaluation.correction && (

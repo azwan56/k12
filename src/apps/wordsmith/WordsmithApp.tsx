@@ -107,20 +107,36 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
     }
   };
 
-  const handleSentenceSubmit = async (sentence: string) => {
+  const evaluateAndRecord = async (sentence: string) => {
     const currentWord = wordBatch[currentIndex];
-    if (!currentWord) return;
+    if (!currentWord || !sentence || isEvaluating) return;
     setIsEvaluating(true);
     setCurrentSentence(sentence);
     try {
       const result = await evaluateSentence(currentWord.word, sentence);
       setCurrentEvaluation(result);
-      setBatchResults((prev) => [...prev, { wordChallenge: currentWord, userSentence: sentence, evaluation: result }]);
+      const entry: BatchResult = { wordChallenge: currentWord, userSentence: sentence, evaluation: result };
+      setBatchResults((prev) => {
+        if (prev.length > currentIndex) {
+          const next = [...prev];
+          next[currentIndex] = entry;
+          return next;
+        }
+        return [...prev, entry];
+      });
     } catch (error) {
       console.error('Failed to evaluate', error);
     } finally {
       setIsEvaluating(false);
     }
+  };
+
+  const handleSentenceSubmit = (sentence: string) => {
+    void evaluateAndRecord(sentence);
+  };
+
+  const handleRetryEvaluation = () => {
+    void evaluateAndRecord(currentSentence);
   };
 
   const handleNext = () => {
@@ -139,8 +155,9 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
         };
         setHistory(saveSession(newSession));
       }
-      const totalStars = batchResults.reduce((acc, r) => acc + r.evaluation.score, 0);
-      setRewardOutcome(recordWordsmith(totalStars));
+      const scoredResults = batchResults.filter((r) => !r.evaluation.isFallback);
+      const totalStars = scoredResults.reduce((acc, r) => acc + r.evaluation.score, 0);
+      setRewardOutcome(scoredResults.length > 0 ? recordWordsmith(totalStars) : null);
       setAppState('summary');
     }
   };
@@ -211,6 +228,8 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
           index={currentIndex + 1}
           total={total}
           isLastWord={currentIndex === wordBatch.length - 1}
+          isRetrying={isEvaluating}
+          onRetry={handleRetryEvaluation}
           onNext={handleNext}
           onQuit={quitBatch}
         />
