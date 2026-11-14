@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
+import { isValidDiscordWebhookUrl } from '../lib/security';
 import { collection, doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc, updateDoc as firestoreUpdateDoc, query, where, getDocs } from 'firebase/firestore';
 import { useRewards } from '../hooks/useRewards';
 
@@ -16,12 +17,21 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     const [guardianEmail, setGuardianEmail] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error' | 'invalid_webhook'>('idle');
     const [connectedStudents, setConnectedStudents] = useState<any[]>([]);
     const { rewards, resolveRedemption, addWish, removeWish } = useRewards();
     const [newWishEmoji, setNewWishEmoji] = useState('🎁');
     const [newWishTitle, setNewWishTitle] = useState('');
     const [newWishCost, setNewWishCost] = useState('100');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [isOpen, onClose]);
 
     useEffect(() => {
         if (isOpen && auth.currentUser) {
@@ -103,15 +113,21 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
 
     const handleSave = async () => {
         if (!auth.currentUser) return;
+        const trimmedWebhook = webhookUrl.trim();
+        if (trimmedWebhook && !isValidDiscordWebhookUrl(trimmedWebhook)) {
+            setSaveStatus('invalid_webhook');
+            return;
+        }
         setIsSaving(true);
         setSaveStatus('idle');
 
         try {
             const userRef = firestoreDoc(db, 'users', auth.currentUser.uid);
             await firestoreUpdateDoc(userRef, {
-                discordWebhookUrl: webhookUrl,
-                guardianEmail: guardianEmail
+                discordWebhookUrl: trimmedWebhook,
+                guardianEmail: guardianEmail.trim()
             });
+            setWebhookUrl(trimmedWebhook);
             setSaveStatus('success');
             setTimeout(() => setSaveStatus('idle'), 3000);
         } catch (error) {
@@ -219,6 +235,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             <p className="text-rose-500 text-sm flex items-center gap-1 mt-2">
                                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
                                                 Failed to save webhook.
+                                            </p>
+                                        )}
+                                        {saveStatus === 'invalid_webhook' && (
+                                            <p className="text-rose-500 text-sm flex items-center gap-1 mt-2">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
+                                                请输入合法的 Discord HTTPS Webhook 地址（https://discord.com/api/webhooks/...）。
                                             </p>
                                         )}
                                         <p className={`text-xs mt-3 italic ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
@@ -417,6 +439,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             type="text"
                                             value={newWishTitle}
                                             onChange={(e) => setNewWishTitle(e.target.value)}
+                                            maxLength={60}
                                             placeholder="新增心愿（如：周末吃冰淇淋）"
                                             className={`flex-1 min-w-[140px] px-3 py-2 rounded-lg border text-sm ${
                                                 isDarkMode ? 'bg-zinc-950 border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
@@ -425,6 +448,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                         <input
                                             type="number"
                                             min={10}
+                                            max={100000}
                                             step={10}
                                             value={newWishCost}
                                             onChange={(e) => setNewWishCost(e.target.value)}
@@ -436,10 +460,10 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                const title = newWishTitle.trim();
-                                                const cost = Math.max(1, parseInt(newWishCost, 10) || 50);
+                                                const title = newWishTitle.trim().slice(0, 60);
+                                                const cost = Math.min(100_000, Math.max(1, parseInt(newWishCost, 10) || 50));
                                                 if (!title) return;
-                                                addWish({ emoji: newWishEmoji.trim() || '🎁', title, cost });
+                                                addWish({ emoji: newWishEmoji.trim().slice(0, 8) || '🎁', title, cost });
                                                 setNewWishTitle('');
                                             }}
                                             className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold rounded-lg flex items-center gap-1 shrink-0"

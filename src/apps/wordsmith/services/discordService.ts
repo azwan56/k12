@@ -2,8 +2,15 @@
  * Service to handle sending reports to Discord via Webhook
  */
 
+import { isValidDiscordWebhookUrl } from '../../../lib/security';
+
 export const sendToDiscord = async (webhookUrl: string, blob: Blob, userName: string): Promise<boolean> => {
   try {
+    const cleanUrl = webhookUrl.trim();
+    if (!isValidDiscordWebhookUrl(cleanUrl)) {
+      console.error('Blocked invalid Discord Webhook URL');
+      return false;
+    }
     const formData = new FormData();
     
     // Create a file from the blob
@@ -16,7 +23,7 @@ export const sendToDiscord = async (webhookUrl: string, blob: Blob, userName: st
       avatar_url: 'https://ais-dev-htg22ilahlcqhdh6gwvi5z-10735257500.us-east5.run.app/favicon.ico' // Use app favicon if available
     }));
 
-    const response = await fetch(webhookUrl, {
+    const response = await fetch(cleanUrl, {
       method: 'POST',
       body: formData,
     });

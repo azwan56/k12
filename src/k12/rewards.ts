@@ -116,8 +116,110 @@ export function createInitialRewardsState(today: string = getLocalDateStr()): Re
     wishes: DEFAULT_WISHES,
     redemptions: [],
     essayAwardedDates: {},
-    updatedAt: Date.now()
+    updatedAt: 0
   };
+}
+
+function clampNonNegInt(val: unknown, fallback = 0): number {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
+function sanitizeWishItem(raw: unknown): WishItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const w = raw as Record<string, unknown>;
+  const id = typeof w.id === 'string' && w.id.trim() ? w.id.trim().slice(0, 64) : '';
+  const title = typeof w.title === 'string' ? w.title.trim().slice(0, 60) : '';
+  if (!id || !title) return null;
+  const rawCost = Number(w.cost);
+  const cost = Number.isFinite(rawCost) ? Math.min(100_000, Math.max(1, Math.floor(rawCost))) : 50;
+  const emoji = typeof w.emoji === 'string' && w.emoji.trim() ? w.emoji.trim().slice(0, 8) : '🎁';
+  return { id, title, cost, emoji };
+}
+
+function sanitizeRedemption(raw: unknown): RedemptionRequest | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === 'string' && r.id.trim() ? r.id.trim().slice(0, 64) : '';
+  const wishId = typeof r.wishId === 'string' ? r.wishId.slice(0, 64) : '';
+  const title = typeof r.title === 'string' ? r.title.trim().slice(0, 60) : '';
+  if (!id || !title) return null;
+  const status = r.status === 'approved' || r.status === 'rejected' ? r.status : 'pending';
+  const rawCost = Number(r.cost);
+  const cost = Number.isFinite(rawCost) ? Math.min(100_000, Math.max(1, Math.floor(rawCost))) : 50;
+  const emoji = typeof r.emoji === 'string' && r.emoji.trim() ? r.emoji.trim().slice(0, 8) : '🎁';
+  const requestedAt = clampNonNegInt(r.requestedAt, 0);
+  const resolvedAt = r.resolvedAt !== undefined ? clampNonNegInt(r.resolvedAt, 0) : undefined;
+  return { id, wishId, title, cost, emoji, status, requestedAt, ...(resolvedAt ? { resolvedAt } : {}) };
+}
+
+/** Sanitize untrusted localStorage / Firestore data into a valid RewardsState. */
+export function sanitizeRewardsState(
+  raw: Partial<RewardsState> | null | undefined,
+  today: string = getLocalDateStr()
+): RewardsState {
+  const init = createInitialRewardsState(today);
+  if (!raw || typeof raw !== 'object') return init;
+
+  const wishes = Array.isArray(raw.wishes)
+    ? raw.wishes.map(sanitizeWishItem).filter((w): w is WishItem => w !== null).slice(0, 30)
+    : [];
+  const redemptions = Array.isArray(raw.redemptions)
+    ? raw.redemptions.map(sanitizeRedemption).filter((r): r is RedemptionRequest => r !== null).slice(0, 30)
+    : [];
+
+  const essayAwardedDates: Record<string, string> = {};
+  if (raw.essayAwardedDates && typeof raw.essayAwardedDates === 'object') {
+    for (const [k, v] of Object.entries(raw.essayAwardedDates).slice(0, 50)) {
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        essayAwardedDates[k.slice(0, 40)] = v;
+      }
+    }
+  }
+
+  const rawStreak = (raw.streak ?? {}) as Partial<StreakState>;
+  const rawDaily = (raw.daily ?? {}) as Partial<DailyProgress>;
+  const rawTasks = (rawDaily.tasks ?? {}) as Partial<Record<DailyTaskKey, boolean>>;
+  const milestoneClaimed = Array.isArray(rawStreak.milestoneClaimed)
+    ? rawStreak.milestoneClaimed.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+
+  return normalizeForToday(
+    {
+      coins: clampNonNegInt(raw.coins, 0),
+      xp: clampNonNegInt(raw.xp, 0),
+      activeTitleId:
+        typeof raw.activeTitleId === 'string' && TITLES.some((t) => t.id === raw.activeTitleId)
+          ? raw.activeTitleId
+          : init.activeTitleId,
+      streak: {
+        current: clampNonNegInt(rawStreak.current, 0),
+        longest: clampNonNegInt(rawStreak.longest, 0),
+        lastCompletedDate:
+          typeof rawStreak.lastCompletedDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawStreak.lastCompletedDate)
+            ? rawStreak.lastCompletedDate
+            : null,
+        freezes: clampNonNegInt(rawStreak.freezes, init.streak.freezes),
+        weeklyCheckIns: Math.min(4, clampNonNegInt(rawStreak.weeklyCheckIns, 0)),
+        milestoneClaimed
+      },
+      daily: {
+        date: typeof rawDaily.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDaily.date) ? rawDaily.date : today,
+        tasks: {
+          practice: Boolean(rawTasks.practice),
+          wordsmith: Boolean(rawTasks.wordsmith),
+          challenge: Boolean(rawTasks.challenge)
+        },
+        goalAwarded: Boolean(rawDaily.goalAwarded)
+      },
+      wishes: wishes.length > 0 ? wishes : init.wishes,
+      redemptions,
+      essayAwardedDates,
+      updatedAt: clampNonNegInt(raw.updatedAt, 0)
+    },
+    today
+  );
 }
 
 /** Ensure daily progress rolls over when the local calendar date changes. */
@@ -243,25 +345,21 @@ export function applyActivityReward(
   };
 }
 
+/** Merge local and remote rewards states without losing newer edits or higher XP. */
+export function mergeRewards(local: RewardsState, remote: Partial<RewardsState>): RewardsState {
+  const remoteNorm = sanitizeRewardsState(remote);
+  const localNorm = sanitizeRewardsState(local);
+  if (localNorm.xp > remoteNorm.xp) return localNorm;
+  if (remoteNorm.xp > localNorm.xp) return remoteNorm;
+  return localNorm.updatedAt >= remoteNorm.updatedAt ? localNorm : remoteNorm;
+}
+
 export function loadLocalRewards(): RewardsState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return createInitialRewardsState();
     const parsed = JSON.parse(raw) as Partial<RewardsState>;
-    const init = createInitialRewardsState();
-    return normalizeForToday({
-      ...init,
-      ...parsed,
-      streak: { ...init.streak, ...parsed.streak },
-      daily: {
-        ...init.daily,
-        ...parsed.daily,
-        tasks: { ...init.daily.tasks, ...parsed.daily?.tasks }
-      },
-      wishes: Array.isArray(parsed.wishes) && parsed.wishes.length > 0 ? parsed.wishes : init.wishes,
-      redemptions: Array.isArray(parsed.redemptions) ? parsed.redemptions : [],
-      essayAwardedDates: parsed.essayAwardedDates ?? {}
-    });
+    return sanitizeRewardsState(parsed);
   } catch {
     return createInitialRewardsState();
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LogOut, Settings } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRewards } from '../hooks/useRewards';
@@ -16,6 +16,25 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
   const { rewards, setActiveTitle } = useRewards();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!titleMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setTitleMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTitleMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [titleMenuOpen]);
 
   const activeTitle = getActiveTitle(rewards);
   const unlockedTitles = getUnlockedTitles(rewards.xp);
@@ -30,9 +49,11 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
       </a>
 
       <div className="flex items-center gap-2">
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
+            aria-expanded={titleMenuOpen}
+            aria-haspopup="menu"
             onClick={() => setTitleMenuOpen((o) => !o)}
             className="flex items-center gap-1.5 px-3 py-1 rounded-full border-[3px] border-ink bg-amber-100 text-xs sm:text-sm font-black hover:bg-amber-200 transition-colors"
             title={`头衔：${activeTitle.label}（${rewards.xp} XP）· 点击切换`}

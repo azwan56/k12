@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { RewardsProvider } from './hooks/useRewards';
 import { getSubject } from './data/k12Subjects';
+import { isAllowedVanpowerRedirectUrl } from './lib/security';
 import { useGrade, useHashRoute } from './k12/ui';
 import TopBar from './k12/TopBar';
 import HomePage from './k12/HomePage';
@@ -23,6 +24,10 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const redirectUrl = params.get('redirect');
     if (params.get('sso_bounce') !== 'true' || !redirectUrl) return;
+    if (!isAllowedVanpowerRedirectUrl(redirectUrl)) {
+      console.error('Blocked untrusted SSO redirect target:', redirectUrl);
+      return;
+    }
 
     if (user) {
       generateCustomTokenAndRedirect(redirectUrl).catch((e) => {
@@ -30,8 +35,9 @@ export default function App() {
         window.location.href = redirectUrl;
       });
     } else {
-      const separator = redirectUrl.includes('?') ? '&' : '?';
-      window.location.href = `${redirectUrl}${separator}sso_failed=true`;
+      const target = new URL(redirectUrl);
+      target.searchParams.set('sso_failed', 'true');
+      window.location.href = target.toString();
     }
   }, [loading, user, generateCustomTokenAndRedirect]);
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut, signInWithRedirect } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
+import { isAllowedVanpowerRedirectUrl } from '../lib/security';
 import Cookies from 'js-cookie';
 
 interface AuthContextType {
@@ -84,6 +85,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const generateCustomTokenAndRedirect = async (destinationUrl: string) => {
+        if (!isAllowedVanpowerRedirectUrl(destinationUrl)) {
+            console.error("Blocked untrusted redirect URL in generateCustomTokenAndRedirect:", destinationUrl);
+            return;
+        }
         if (!user) {
             window.location.href = destinationUrl;
             return;

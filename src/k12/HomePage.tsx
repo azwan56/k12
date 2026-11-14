@@ -20,8 +20,9 @@ export default function HomePage({ grade }: { grade: GradeLevel }) {
 
   // Pick the nearest affordable or next wish for the progress bar
   const sortedWishes = [...rewards.wishes].sort((a, b) => a.cost - b.cost);
-  const nextWish = sortedWishes.find((w) => rewards.coins < w.cost) ?? sortedWishes[0];
-  const wishPct = nextWish ? Math.min(100, Math.round((rewards.coins / nextWish.cost) * 100)) : 100;
+  const nextWish = sortedWishes.find((w) => rewards.coins < w.cost) ?? sortedWishes[sortedWishes.length - 1];
+  const wishPct =
+    nextWish && nextWish.cost > 0 ? Math.min(100, Math.round((rewards.coins / nextWish.cost) * 100)) : 100;
 
   const handleRedeem = (wishId: string) => {
     const wish = rewards.wishes.find((w) => w.id === wishId);

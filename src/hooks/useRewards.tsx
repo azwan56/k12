@@ -7,9 +7,10 @@ import {
   RewardsState,
   WishItem,
   applyActivityReward,
-  createInitialRewardsState,
   getLocalDateStr,
+  getUnlockedTitles,
   loadLocalRewards,
+  mergeRewards,
   normalizeForToday,
   saveLocalRewards
 } from '../k12/rewards';
@@ -29,27 +30,7 @@ interface RewardsContextValue {
 
 const RewardsContext = createContext<RewardsContextValue | null>(null);
 
-function mergeRewards(local: RewardsState, remote: Partial<RewardsState>): RewardsState {
-  const init = createInitialRewardsState();
-  const remoteNorm = normalizeForToday({
-    ...init,
-    ...remote,
-    streak: { ...init.streak, ...remote.streak },
-    daily: {
-      ...init.daily,
-      ...remote.daily,
-      tasks: { ...init.daily.tasks, ...remote.daily?.tasks }
-    },
-    wishes: Array.isArray(remote.wishes) && remote.wishes.length > 0 ? remote.wishes : init.wishes,
-    redemptions: Array.isArray(remote.redemptions) ? remote.redemptions : [],
-    essayAwardedDates: remote.essayAwardedDates ?? {}
-  });
-  const localNorm = normalizeForToday(local);
-  // Prefer whichever has higher cumulative XP, or newer updatedAt on tie
-  if (localNorm.xp > remoteNorm.xp) return localNorm;
-  if (remoteNorm.xp > localNorm.xp) return remoteNorm;
-  return localNorm.updatedAt >= remoteNorm.updatedAt ? localNorm : remoteNorm;
-}
+export { mergeRewards };
 
 export function RewardsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -169,6 +150,8 @@ export function RewardsProvider({ children }: { children: React.ReactNode }) {
 
   const setActiveTitle = useCallback(
     (titleId: string) => {
+      const unlocked = getUnlockedTitles(rewardsRef.current.xp);
+      if (!unlocked.some((t) => t.id === titleId)) return;
       persist({ ...rewardsRef.current, activeTitleId: titleId, updatedAt: Date.now() });
     },
     [persist]

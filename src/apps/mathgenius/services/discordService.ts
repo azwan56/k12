@@ -2,10 +2,13 @@
  * Service to handle sending reports to Discord via Webhook
  */
 
+import { isValidDiscordWebhookUrl } from '../../../lib/security';
+
 export const sendToDiscord = async (webhookUrl: string, blob: Blob, userName: string): Promise<{ success: boolean; error?: string }> => {
   try {
     const cleanUrl = webhookUrl.trim();
     if (!cleanUrl) return { success: false, error: 'Empty webhook URL' };
+    if (!isValidDiscordWebhookUrl(cleanUrl)) return { success: false, error: 'Invalid Discord webhook URL' };
 
     const formData = new FormData();
 
