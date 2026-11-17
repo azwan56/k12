@@ -4,6 +4,8 @@ import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
 import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
+import { drawUnseenFromStorage, shuffleOptionsWithAnswer } from '../../k12/questionDedupe';
+import ReportActions from '../../k12/ReportActions';
 import type { ActivityRewardOutcome } from '../../k12/rewards';
 import RewardBanner from '../../k12/RewardBanner';
 import { BackLink } from '../../k12/SubjectPage';
@@ -18,18 +20,13 @@ import { type Question, SEASONS, type SeasonId } from './seasonData';
 
 type ViewState = 'levels' | 'playing' | 'finished';
 
+interface ReviewWithExplanation extends QuestionReviewItem {
+  explanation?: string;
+}
+
 const QUESTIONS_PER_ROUND = 5;
 const PASSING_SCORE = 5;
 const TOTAL_LEVELS = 10;
-
-function shuffleQuestions(pool: Question[]): Question[] {
-  const copy = [...pool];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
 
 export default function HumanityApp({ grade }: { grade: GradeLevel }) {
   const { user } = useAuth();
@@ -47,8 +44,11 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
   const [score, setScore] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
-  const [reviewItems, setReviewItems] = useState<QuestionReviewItem[]>([]);
+  const [reviewItems, setReviewItems] = useState<ReviewWithExplanation[]>([]);
+  const [runSeq, setRunSeq] = useState(0);
+  const [lastDurationSec, setLastDurationSec] = useState<number | null>(null);
   const startedAtRef = useRef<number>(Date.now());
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const currentSeason = useMemo(
     () => SEASONS.find((s) => s.id === seasonId) ?? SEASONS[0],
@@ -60,7 +60,12 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
   const startLevel = (level: number) => {
     const pool = currentSeason.data[level - 1] || currentSeason.data[0];
-    const drawn = shuffleQuestions(pool).slice(0, QUESTIONS_PER_ROUND);
+    const scope = `humanity_${user?.uid || 'guest'}_s${seasonId}_l${level}`;
+    const { selected } = drawUnseenFromStorage(scope, pool, (q) => q.question, QUESTIONS_PER_ROUND);
+    const drawn = selected.map((q) => {
+      const shuffled = shuffleOptionsWithAnswer(q.options, q.answer);
+      return { ...q, options: shuffled.options, answer: shuffled.answer };
+    });
     setQuestions(drawn);
     setPlayingLevel(level);
     setQuestionIndex(0);
@@ -68,6 +73,8 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
     setSelectedOption(null);
     setRewardOutcome(null);
     setReviewItems([]);
+    setLastDurationSec(null);
+    setRunSeq((n) => n + 1);
     startedAtRef.current = Date.now();
     setView('playing');
   };
@@ -89,6 +96,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
         correctAnswer: currentQuestion.options[currentQuestion.answer] ?? '',
         isCorrect,
         category: currentSeason.levels[playingLevel - 1] || currentSeason.title,
+        explanation: currentQuestion.explanation,
       },
     ]);
   };
@@ -102,6 +110,8 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
     const outcome = recordPractice(score, QUESTIONS_PER_ROUND);
     setRewardOutcome(outcome);
+    const durationSec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+    setLastDurationSec(durationSec);
 
     if (score >= PASSING_SCORE && playingLevel === unlockedLevel && unlockedLevel < TOTAL_LEVELS) {
       const nextLevel = unlockedLevel + 1;
@@ -115,7 +125,9 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
     if (user) {
       const levelTitle = currentSeason.levels[playingLevel - 1] || `第 ${playingLevel} 关`;
-      const durationSec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+      const cleanedReview: QuestionReviewItem[] = reviewItems.map(
+        ({ explanation: _explanation, ...rest }) => rest
+      );
       void recordStudentActivity(
         user,
         { profile, resolvedName, effectiveAvatarId, rewards: outcome.nextState },
@@ -129,7 +141,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
           accuracyPct: Math.round((score / QUESTIONS_PER_ROUND) * 100),
           durationSec,
           summary: `${currentSeason.title} 第${playingLevel}关，答对 ${score}/${QUESTIONS_PER_ROUND} 题${score >= PASSING_SCORE ? '（通关）' : ''}`,
-          questionItems: reviewItems,
+          questionItems: cleanedReview,
         }
       ).catch((err) => {
         console.warn('[HumanityApp] Failed to record activity:', err);
@@ -236,21 +248,78 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
   if (view === 'finished') {
     const passed = score >= PASSING_SCORE;
+    const accuracyPct = Math.round((score / QUESTIONS_PER_ROUND) * 100);
+    const levelTitle = currentSeason.levels[playingLevel - 1] || `第 ${playingLevel} 关`;
+    const studentName = resolvedName || user?.displayName || '同学';
     return (
       <>
         <BackLink href="#/s/humanity" />
-        <div className="chunky bg-amber-100 mt-8 p-8 text-center">
-          <div className="text-6xl grid place-items-center" aria-hidden="true">
-            {passed ? <Trophy className="w-16 h-16 text-amber-500" /> : '💪'}
+
+        {/* Screenshot-ready Report Card */}
+        <div ref={reportRef} className="mt-6 bg-white rounded-3xl border-[3px] border-ink p-6">
+          <div className="text-center">
+            <p className="font-extrabold text-amber-800">
+              {currentSeason.title} · 第 {playingLevel} 关《{levelTitle}》 · {studentName}
+            </p>
+            <div className="mt-2 inline-grid place-items-center" aria-hidden="true">
+              {passed ? <Trophy className="w-12 h-12 text-amber-500" /> : <span className="text-4xl">💪</span>}
+            </div>
+            <h1 className="text-3xl font-black mt-2">
+              {passed ? `恭喜通过第 ${playingLevel} 关！` : `第 ${playingLevel} 关差一点通关`}
+            </h1>
+            <p className="text-5xl font-black mt-3 tabular-nums">
+              {score}
+              <span className="text-2xl text-slate-600"> / {QUESTIONS_PER_ROUND}</span>
+            </p>
+            <p className="text-sm font-extrabold text-slate-600 mt-2">
+              正确率 {accuracyPct}%
+              {lastDurationSec !== null && ` · 用时 ${lastDurationSec} 秒`}
+              {' · '}
+              {passed ? '全对通关！已解锁下一关' : '需全对解锁下一关'}
+            </p>
           </div>
-          <h1 className="text-3xl font-black mt-4">
-            {passed ? `恭喜通过第 ${playingLevel} 关！` : `第 ${playingLevel} 关差一点通关`}
-          </h1>
-          <p className="text-5xl font-black mt-3">
-            {score} / {QUESTIONS_PER_ROUND}
-          </p>
-          <p className="font-bold text-slate-700 mt-2">
-            {passed ? '全对通关！已解锁下一关挑战。' : '每关随机 5 题，全部答对即可解锁下一关。'}
+
+          <ul className="mt-6 space-y-2.5">
+            {reviewItems.map((item, i) => (
+              <li
+                key={i}
+                className={`rounded-2xl p-3.5 border-2 ${
+                  item.isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <span
+                    className={`mt-0.5 w-5 h-5 shrink-0 rounded-full border-2 border-ink grid place-items-center ${
+                      item.isCorrect ? 'bg-emerald-300' : 'bg-rose-300'
+                    }`}
+                  >
+                    {item.isCorrect ? (
+                      <Check className="w-3 h-3" aria-hidden="true" />
+                    ) : (
+                      <X className="w-3 h-3" aria-hidden="true" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-sm text-ink">{i + 1}. {item.question}</p>
+                    <p className="text-xs font-bold text-slate-700 mt-1">
+                      你的作答：{item.userAnswer}
+                      {!item.isCorrect && (
+                        <span className="ml-2 text-emerald-800 font-black">
+                          正确答案：{item.correctAnswer}
+                        </span>
+                      )}
+                    </p>
+                    {item.explanation && (
+                      <p className="text-xs font-semibold text-slate-600 mt-1">{item.explanation}</p>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <p className="text-center text-xs font-extrabold text-slate-500 mt-5 tracking-widest">
+            K12.VANPOWER.LIVE
           </p>
         </div>
 
@@ -282,6 +351,14 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
             </button>
           )}
         </div>
+
+        <ReportActions
+          reportRef={reportRef}
+          subjectLabel={`人文大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`}
+          scoreSummary={`${score}/${QUESTIONS_PER_ROUND} 题（${accuracyPct}%）`}
+          filePrefix="K12-Humanity"
+          sessionKey={`humanity-s${seasonId}-l${playingLevel}-${runSeq}`}
+        />
       </>
     );
   }

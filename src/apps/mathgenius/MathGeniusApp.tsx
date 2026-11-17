@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
 import type { ActivityRewardOutcome } from '../../k12/rewards';
+import { getRecentMathStems } from '../../k12/questionDedupe';
 import type { QuestionReviewItem } from '../../k12/studentProgress';
 import { recordStudentActivity, updateStudentActivityFeedback } from '../../k12/studentProgressService';
 import {
@@ -82,8 +83,15 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
     setState(AppState.LOADING);
     setError(null);
     try {
-      // Passes active difficulty and weak-point weighting categories to Gemini
-      const newQuestions = await generateMathQuestions(language, category, difficulty, profile.weakCategories);
+      // Passes active difficulty, weak-point weighting, and recent stems to prevent repeats
+      const newQuestions = await generateMathQuestions(
+        language,
+        category,
+        difficulty,
+        profile.weakCategories,
+        getRecentMathStems(user?.uid, 20),
+        user?.uid
+      );
       if (run !== runRef.current) return;
       setQuestions(newQuestions);
       setCurrentQuestionIndex(0);

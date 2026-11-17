@@ -1,16 +1,68 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../../lib/firebase";
+import { IG_MATH_QUESTIONS } from "../../../data/questionBanks/igMathQuestions";
+import { SHANGHAI_MATH_QUESTIONS } from "../../../data/questionBanks/shanghaiMathQuestions";
+import {
+  drawUnseenFromStorage,
+  rememberRecentMathStems,
+  shuffleOptionsWithAnswer,
+} from "../../../k12/questionDedupe";
 import { Question, UserAnswer, DifficultyLevel } from "../types";
+
+function buildLocalFallbackMathQuestions(
+  language: 'en' | 'zh',
+  uid?: string
+): Question[] {
+  const sourcePool =
+    language === 'zh'
+      ? SHANGHAI_MATH_QUESTIONS.filter((item) => item.grade === 'G6')
+      : IG_MATH_QUESTIONS.filter((item) => item.grade === 'G6');
+  const { selected } = drawUnseenFromStorage(
+    `mg_fallback_${uid || 'guest'}_${language}`,
+    sourcePool,
+    (item) => item.id,
+    10
+  );
+  const stamp = Date.now();
+  const converted: Question[] = selected.map((item, idx) => {
+    const shuffled = shuffleOptionsWithAnswer(item.options, item.answer);
+    return {
+      id: `mg_local_${stamp}_${idx + 1}`,
+      question: item.question,
+      options: shuffled.options,
+      correctAnswer: shuffled.options[shuffled.answer],
+      hint:
+        language === 'zh'
+          ? '先列出已知条件与数量关系，分步计算并仔细验算。'
+          : 'Identify the known values and write down each step carefully before calculating.',
+      explanation: item.explanation,
+      category: language === 'zh' ? '六年级数学精选' : 'Grade 6 Math Practice',
+    };
+  });
+  rememberRecentMathStems(
+    uid,
+    converted.map((q) => q.question)
+  );
+  return converted;
+}
 
 export const generateMathQuestions = async (
   language: 'en' | 'zh' = 'en',
   category: string = 'all',
   difficulty: DifficultyLevel = 'standard',
-  weakPoints: string[] = []
+  weakPoints: string[] = [],
+  recentQuestions: string[] = [],
+  uid?: string
 ): Promise<Question[]> => {
   try {
     const generateQuestionsCallable = httpsCallable<
-      { language: string; category: string; difficulty: string; weakPoints: string[] },
+      {
+        language: string;
+        category: string;
+        difficulty: string;
+        weakPoints: string[];
+        recentQuestions: string[];
+      },
       { questions: Question[] }
     >(functions, 'generateMathQuestions');
 
@@ -18,15 +70,25 @@ export const generateMathQuestions = async (
       language,
       category,
       difficulty,
-      weakPoints
+      weakPoints,
+      recentQuestions,
     });
     if (result.data && Array.isArray(result.data.questions) && result.data.questions.length > 0) {
-      return result.data.questions;
+      const stamp = Date.now();
+      const normalized = result.data.questions.map((item, idx) => ({
+        ...item,
+        id: `mg_${stamp}_${idx + 1}`,
+      }));
+      rememberRecentMathStems(
+        uid,
+        normalized.map((q) => q.question)
+      );
+      return normalized;
     }
     throw new Error("Empty questions returned from backend.");
   } catch (error) {
-    console.error("Failed to generate questions via Cloud Function:", error);
-    throw new Error("Failed to generate questions. Please try again.");
+    console.warn("Cloud Function unavailable for MathGenius, falling back to local unseen bank:", error);
+    return buildLocalFallbackMathQuestions(language, uid);
   }
 };
 

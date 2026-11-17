@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
-import { ESSAY_PROMPTS, GradeLevel } from '../data/k12Subjects';
+import { ESSAY_PROMPTS, GradeLevel, gradeLabel } from '../data/k12Subjects';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { useRewards } from '../hooks/useRewards';
+import ReportActions from './ReportActions';
 import type { ActivityRewardOutcome } from './rewards';
 import RewardBanner from './RewardBanner';
 import { recordStudentActivity } from './studentProgressService';
@@ -16,7 +17,9 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
 
   const [draft, setDraft] = useState('');
   const [done, setDone] = useState(false);
+  const [submissionCount, setSubmissionCount] = useState(0);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const { profile, resolvedName, effectiveAvatarId } = useProfile();
   const { rewards, recordEssay } = useRewards();
@@ -48,18 +51,18 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
         命题作文 <span aria-hidden="true">📝</span>
       </h1>
 
-      <div role="group" aria-label="选择题目" className="flex flex-wrap gap-3 mt-6">
+      <div role="group" aria-label="选择题目" className="flex flex-wrap gap-2.5 mt-6">
         {prompts.map((p) => (
           <button
             key={p.id}
             type="button"
             aria-pressed={p.id === prompt.id}
             onClick={() => setPromptId(p.id)}
-            className={`px-5 py-2 rounded-full border-[3px] border-ink font-extrabold transition-colors ${
+            className={`px-4 py-2 rounded-full border-[3px] border-ink font-extrabold text-sm transition-colors ${
               p.id === prompt.id ? 'bg-rose-300 shadow-[3px_3px_0_var(--color-ink)]' : 'bg-white hover:bg-yellow-50'
             }`}
           >
-            {p.genre}
+            {p.genre} · {p.title}
           </button>
         ))}
       </div>
@@ -100,6 +103,7 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
           type="button"
           onClick={() => {
             setDone(true);
+            setSubmissionCount((c) => c + 1);
             const outcome = words >= min ? recordEssay(prompt.id) : null;
             if (outcome) setRewardOutcome(outcome);
             if (user && draft.trim().length > 0) {
@@ -137,18 +141,42 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
       <div aria-live="polite">
         {done && (
           <>
-            <p className="text-xl font-black mt-6">
-              {words < min ? '再多写一点，加个例子吧 ✏️' : words > max ? '有点长啦，试试删掉重复的句子 ✂️' : '字数刚刚好，真棒！🎉'}
-            </p>
-            {user && (
-              <p className="text-sm font-bold text-emerald-700 mt-2">
-                ✓ 已同步至学习档案，家长可在督学看板查看正文
+            <div ref={reportRef} className="mt-6 bg-white rounded-3xl border-[3px] border-ink p-6">
+              <div className="text-center">
+                <p className="font-extrabold text-rose-800">
+                  英语命题作文 · {prompt.genre} · {gradeLabel(grade)} · {resolvedName || user?.displayName || '同学'}
+                </p>
+                <h2 className="text-2xl sm:text-3xl font-black mt-1">《{prompt.title}》</h2>
+                <p className="text-sm font-extrabold text-slate-600 mt-2">
+                  已完成 {words} 词（建议 {min}–{max} 词） ·{' '}
+                  {words < min
+                    ? '再多写一点，加个例子吧 ✏️'
+                    : words > max
+                      ? '有点长啦，试试删掉重复的句子 ✂️'
+                      : '字数刚刚好，真棒！🎉'}
+                </p>
+              </div>
+              <div className="mt-5 rounded-2xl bg-rose-50 border-2 border-ink/20 p-4">
+                <p className="font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed break-words">
+                  {draft.trim()}
+                </p>
+              </div>
+              <p className="text-center text-xs font-extrabold text-slate-500 mt-5 tracking-widest">
+                K12.VANPOWER.LIVE
               </p>
-            )}
+            </div>
+            <RewardBanner outcome={rewardOutcome} />
+            <ReportActions
+              reportRef={reportRef}
+              subjectLabel={`命题作文 · ${prompt.genre}《${prompt.title}》`}
+              scoreSummary={`${words} 词（目标 ${min}–${max} 词）`}
+              filePrefix="K12-Essay"
+              sessionKey={`essay-${prompt.id}-${submissionCount}`}
+              autoSend={words >= min}
+            />
           </>
         )}
       </div>
-      <RewardBanner outcome={rewardOutcome} />
     </>
   );
 }

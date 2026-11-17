@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../../lib/firebase";
+import { drawUnseenFromStorage } from "../../../k12/questionDedupe";
 import { WordChallenge, EvaluationResult } from "../types";
 import { createEvaluationFallback, normalizeEvaluationResult } from "../wordsmithRules";
 
@@ -134,30 +135,29 @@ const WORD_BANK: WordChallenge[] = [
   { word: "Hasty", partOfSpeech: "adjective", definition: "Done with excessive speed.", synonyms: ["quick", "rushed"] },
   { word: "Healthy", partOfSpeech: "adjective", definition: "In good physical condition.", synonyms: ["fit", "well"] },
   { word: "Heated", partOfSpeech: "adjective", definition: "Showing strong feeling or anger.", synonyms: ["angry", "intense"] },
-  { word: "Heavy", partOfSpeech: "adjective", definition: "Of great weight.", synonyms: ["weighty", "bulky"] },
-  { word: "Helpful", partOfSpeech: "adjective", definition: "Giving or ready to give help.", synonyms: ["useful", "kind"] },
+  { word: "Precarious", partOfSpeech: "adjective", definition: "Not securely held or in position; likely to fail.", synonyms: ["uncertain", "unstable"] },
   { word: "Heroic", partOfSpeech: "adjective", definition: "Having the qualities of a hero.", synonyms: ["brave", "valiant"] },
-  { word: "High", partOfSpeech: "adjective", definition: "Of great vertical extent.", synonyms: ["tall", "elevated"] },
+  { word: "Ambiguous", partOfSpeech: "adjective", definition: "Open to more than one interpretation; unclear.", synonyms: ["vague", "unclear"] },
   { word: "Hilarious", partOfSpeech: "adjective", definition: "Extremely funny.", synonyms: ["funny", "comical"] },
-  { word: "Honest", partOfSpeech: "adjective", definition: "Free of deceit and untruthful.", synonyms: ["truthful", "sincere"] },
+  { word: "Honest", partOfSpeech: "adjective", definition: "Free of deceit and truthful.", synonyms: ["truthful", "sincere"] },
   { word: "Hopeful", partOfSpeech: "adjective", definition: "Feeling or inspiring optimism.", synonyms: ["optimistic", "positive"] },
   { word: "Horrible", partOfSpeech: "adjective", definition: "Causing horror.", synonyms: ["awful", "terrible"] },
-  { word: "Hospitable", partOfSpeech: "adjective", definition: "Friendly to guests.", synonyms: ["welcoming", "friendly"] },
+  { word: "Hospitable", partOfSpeech: "adjective", definition: "Friendly and welcoming to guests.", synonyms: ["welcoming", "friendly"] },
   { word: "Hostile", partOfSpeech: "adjective", definition: "Unfriendly and antagonistic.", synonyms: ["unfriendly", "aggressive"] },
-  { word: "Huge", partOfSpeech: "adjective", definition: "Extremely large.", synonyms: ["enormous", "gigantic"] },
+  { word: "Inevitable", partOfSpeech: "adjective", definition: "Certain to happen; unavoidable.", synonyms: ["unavoidable", "certain"] },
   { word: "Humane", partOfSpeech: "adjective", definition: "Having or showing compassion.", synonyms: ["kind", "caring"] },
-  { word: "Humble", partOfSpeech: "adjective", definition: "Having a modest view of one's importance.", synonyms: ["modest", "simple"] },
+  { word: "Plausible", partOfSpeech: "adjective", definition: "Seeming reasonable or believable.", synonyms: ["believable", "credible"] },
   { word: "Humorous", partOfSpeech: "adjective", definition: "Causing laughter and amusement.", synonyms: ["funny", "witty"] },
-  { word: "Hungry", partOfSpeech: "adjective", definition: "Feeling a need for food.", synonyms: ["famished", "starving"] },
+  { word: "Pragmatic", partOfSpeech: "adjective", definition: "Dealing with things sensibly and realistically.", synonyms: ["practical", "realistic"] },
   { word: "Hurried", partOfSpeech: "adjective", definition: "Done with great haste.", synonyms: ["rushed", "fast"] },
   { word: "Hurtful", partOfSpeech: "adjective", definition: "Causing emotional pain.", synonyms: ["painful", "cruel"] },
   { word: "Hysterical", partOfSpeech: "adjective", definition: "Deriving from extreme emotion.", synonyms: ["wild", "frantic"] },
-  { word: "Icy", partOfSpeech: "adjective", definition: "Covered with or consisting of ice.", synonyms: ["cold", "frozen"] },
+  { word: "Meticulous", partOfSpeech: "adjective", definition: "Showing great attention to detail; very careful.", synonyms: ["thorough", "precise"] },
   { word: "Ideal", partOfSpeech: "adjective", definition: "Satisfying one's conception of what is perfect.", synonyms: ["perfect", "best"] },
   { word: "Identical", partOfSpeech: "adjective", definition: "Similar in every detail.", synonyms: ["same", "equal"] },
   { word: "Idle", partOfSpeech: "adjective", definition: "Not active or in use.", synonyms: ["inactive", "lazy"] },
   { word: "Ignorant", partOfSpeech: "adjective", definition: "Lacking knowledge or awareness.", synonyms: ["uninformed", "unaware"] },
-  { word: "Ill", partOfSpeech: "adjective", definition: "Suffering from a disease or feeling unwell.", synonyms: ["sick", "unwell"] },
+  { word: "Versatile", partOfSpeech: "adjective", definition: "Able to adapt to many different functions or tasks.", synonyms: ["adaptable", "flexible"] },
   { word: "Illegal", partOfSpeech: "adjective", definition: "Contrary to or forbidden by law.", synonyms: ["unlawful", "prohibited"] },
   { word: "Illustrious", partOfSpeech: "adjective", definition: "Well known and respected.", synonyms: ["famous", "eminent"] },
   { word: "Imaginary", partOfSpeech: "adjective", definition: "Existing only in the mind.", synonyms: ["fanciful", "fictional"] },
@@ -560,58 +560,68 @@ const WORD_BANK: WordChallenge[] = [
   { word: "Divorce", partOfSpeech: "noun", definition: "The legal dissolution of a marriage.", synonyms: ["split", "separation"] },
   { word: "Doctor", partOfSpeech: "noun", definition: "A qualified practitioner of medicine.", synonyms: ["physician", "medic"] },
   { word: "Document", partOfSpeech: "noun", definition: "A piece of written matter.", synonyms: ["paper", "record"] },
-  { word: "Dog", partOfSpeech: "noun", definition: "A domesticated carnivorous mammal.", synonyms: ["hound", "canine"] },
-  { word: "Dollar", partOfSpeech: "noun", definition: "The basic monetary unit of the US.", synonyms: ["buck", "currency"] },
-  { word: "Domain", partOfSpeech: "noun", definition: "An area of territory owned by a ruler.", synonyms: ["territory", "field"] },
+  { word: "Hypothesis", partOfSpeech: "noun", definition: "A proposed explanation made as a starting point for investigation.", synonyms: ["theory", "assumption"] },
+  { word: "Phenomenon", partOfSpeech: "noun", definition: "A remarkable fact, event, or situation that can be observed.", synonyms: ["occurrence", "event"] },
+  { word: "Domain", partOfSpeech: "noun", definition: "An area of territory or knowledge.", synonyms: ["territory", "field"] },
   { word: "Dominance", partOfSpeech: "noun", definition: "Power and influence over others.", synonyms: ["control", "rule"] },
-  { word: "Donation", partOfSpeech: "noun", definition: "Something that is given to a charity.", synonyms: ["gift", "contribution"] },
-  { word: "Door", partOfSpeech: "noun", definition: "A hinged barrier used to close an opening.", synonyms: ["portal", "entryway"] },
-  { word: "Dose", partOfSpeech: "noun", definition: "A quantity of a medicine taken at one time.", synonyms: ["amount", "measure"] },
-  { word: "Dot", partOfSpeech: "noun", definition: "A small round mark or spot.", synonyms: ["spot", "point"] },
-  { word: "Double", partOfSpeech: "noun", definition: "A person or thing that looks exactly like another.", synonyms: ["twin", "duplicate"] },
+  { word: "Donation", partOfSpeech: "noun", definition: "Something given to support a charity or cause.", synonyms: ["gift", "contribution"] },
+  { word: "Perspective", partOfSpeech: "noun", definition: "A particular way of viewing or thinking about something.", synonyms: ["viewpoint", "angle"] },
+  { word: "Criterion", partOfSpeech: "noun", definition: "A principle or standard by which something may be judged.", synonyms: ["standard", "benchmark"] },
+  { word: "Momentum", partOfSpeech: "noun", definition: "Strength or speed gained by a moving object or growing idea.", synonyms: ["impetus", "drive"] },
+  { word: "Integrity", partOfSpeech: "noun", definition: "The quality of being honest and having strong moral principles.", synonyms: ["honesty", "honor"] },
+  { word: "Innovation", partOfSpeech: "noun", definition: "A new method, idea, or invention.", synonyms: ["invention", "breakthrough"] },
   { word: "Doubt", partOfSpeech: "noun", definition: "A feeling of uncertainty or lack of conviction.", synonyms: ["uncertainty", "hesitation"] },
-  { word: "Down", partOfSpeech: "noun", definition: "Fine soft feathers of birds.", synonyms: ["feathers", "fluff"] },
-  { word: "Draft", partOfSpeech: "noun", definition: "A preliminary version of a piece of writing.", synonyms: ["outline", "sketch"] },
-  { word: "Dragon", partOfSpeech: "noun", definition: "A mythical monster like a giant reptile.", synonyms: ["serpent", "monster"] },
-  { word: "Drama", partOfSpeech: "noun", definition: "A play for theater, radio, or television.", synonyms: ["play", "show"] },
-  { word: "Drawer", partOfSpeech: "noun", definition: "A boxlike storage compartment.", synonyms: ["compartment", "shelf"] },
-  { word: "Drawing", partOfSpeech: "noun", definition: "A picture or diagram made with a pencil.", synonyms: ["picture", "sketch"] },
-  { word: "Dream", partOfSpeech: "noun", definition: "A series of thoughts occurring in a person's sleep.", synonyms: ["vision", "fantasy"] },
-  { word: "Dress", partOfSpeech: "noun", definition: "A one-piece garment for a woman or girl.", synonyms: ["gown", "frock"] },
+  { word: "Catalyst", partOfSpeech: "noun", definition: "Something that speeds up a change or reaction.", synonyms: ["spark", "trigger"] },
+  { word: "Landmark", partOfSpeech: "noun", definition: "A notable feature or turning point in history or landscape.", synonyms: ["milestone", "monument"] },
+  { word: "Consensus", partOfSpeech: "noun", definition: "General agreement among members of a group.", synonyms: ["agreement", "harmony"] },
+  { word: "Precedent", partOfSpeech: "noun", definition: "An earlier event or decision used as an example later.", synonyms: ["example", "model"] },
+  { word: "Equilibrium", partOfSpeech: "noun", definition: "A state of balance between opposing forces.", synonyms: ["balance", "stability"] },
+  { word: "Paradox", partOfSpeech: "noun", definition: "A statement that seems contradictory yet reveals a truth.", synonyms: ["contradiction", "puzzle"] },
+  { word: "Sanctuary", partOfSpeech: "noun", definition: "A place of refuge or safety.", synonyms: ["haven", "shelter"] },
+  { word: "Threshold", partOfSpeech: "noun", definition: "A starting point or level at which something begins to happen.", synonyms: ["brink", "doorway"] },
   { word: "Drift", partOfSpeech: "noun", definition: "The continuous slow movement from one place to another.", synonyms: ["flow", "current"] },
-  { word: "Drill", partOfSpeech: "noun", definition: "A hand tool or machine with a rotating cutting tip.", synonyms: ["tool", "exercise"] },
-  { word: "Drink", partOfSpeech: "noun", definition: "A liquid that can be swallowed.", synonyms: ["beverage", "liquid"] },
-  { word: "Drive", partOfSpeech: "noun", definition: "A trip or journey in a car.", synonyms: ["trip", "journey"] },
-  { word: "Driver", partOfSpeech: "noun", definition: "A person who drives a vehicle.", synonyms: ["operator", "pilot"] },
-  { word: "Drop", partOfSpeech: "noun", definition: "A small round mass of liquid.", synonyms: ["bead", "globule"] },
+  { word: "Trajectory", partOfSpeech: "noun", definition: "The curved path followed by a flying object or developing plan.", synonyms: ["path", "course"] },
+  { word: "Chronicle", partOfSpeech: "noun", definition: "A detailed written record of events in order of time.", synonyms: ["record", "history"] },
+  { word: "Incentive", partOfSpeech: "noun", definition: "Something that motivates or encourages action.", synonyms: ["motivation", "reward"] },
+  { word: "Metaphor", partOfSpeech: "noun", definition: "A figure of speech describing one thing as another directly.", synonyms: ["analogy", "symbol"] },
+  { word: "Perseverance", partOfSpeech: "noun", definition: "Steady persistence in spite of difficulty or delay.", synonyms: ["persistence", "grit"] },
   { word: "Drought", partOfSpeech: "noun", definition: "A prolonged period of abnormally low rainfall.", synonyms: ["dry spell", "aridness"] },
-  { word: "Drug", partOfSpeech: "noun", definition: "A medicine or other substance.", synonyms: ["medicine", "remedy"] },
-  { word: "Drum", partOfSpeech: "noun", definition: "A percussion instrument.", synonyms: ["snare", "bongo"] },
-  { word: "Dryer", partOfSpeech: "noun", definition: "A machine or device for drying something.", synonyms: ["drying machine", "airer"] },
-  { word: "Dual", partOfSpeech: "noun", definition: "Consisting of two parts.", synonyms: ["double", "twin"] },
-  { word: "Duck", partOfSpeech: "noun", definition: "A waterbird with a broad blunt bill.", synonyms: ["mallard", "teal"] },
-  { word: "Dude", partOfSpeech: "noun", definition: "A man; a guy.", synonyms: ["man", "guy"] },
-  { word: "Due", partOfSpeech: "noun", definition: "Expected at or planned for at a certain time.", synonyms: ["owed", "expected"] },
-  { word: "Duke", partOfSpeech: "noun", definition: "A male holding the highest hereditary title.", synonyms: ["nobleman", "lord"] },
-  { word: "Dump", partOfSpeech: "noun", definition: "A site for depositing garbage.", synonyms: ["tip", "junkyard"] },
+  { word: "Substantiate", partOfSpeech: "verb", definition: "To provide evidence that proves a claim is true.", synonyms: ["verify", "prove"] },
+  { word: "Mitigate", partOfSpeech: "verb", definition: "To make something harmful less severe.", synonyms: ["lessen", "ease"] },
+  { word: "Scrutinize", partOfSpeech: "verb", definition: "To examine closely and carefully.", synonyms: ["inspect", "analyze"] },
+  { word: "Resonate", partOfSpeech: "verb", definition: "To evoke strong shared feeling or ring clearly.", synonyms: ["echo", "connect"] },
+  { word: "Persevere", partOfSpeech: "verb", definition: "To keep trying despite obstacles.", synonyms: ["persist", "endure"] },
+  { word: "Dual", partOfSpeech: "adjective", definition: "Consisting of two parts or roles.", synonyms: ["double", "twin"] },
+  { word: "Resilience", partOfSpeech: "noun", definition: "The capacity to recover quickly from difficulties.", synonyms: ["toughness", "adaptability"] },
+  { word: "Endeavor", partOfSpeech: "noun", definition: "A serious attempt to achieve a goal.", synonyms: ["effort", "attempt"] },
+  { word: "Due", partOfSpeech: "adjective", definition: "Expected at or planned for at a certain time.", synonyms: ["owed", "expected"] },
+  { word: "Spectrum", partOfSpeech: "noun", definition: "A wide continuous range of related ideas or values.", synonyms: ["range", "band"] },
+  { word: "Empathy", partOfSpeech: "noun", definition: "The ability to understand and share another person's feelings.", synonyms: ["compassion", "understanding"] },
   { word: "Duo", partOfSpeech: "noun", definition: "A pair of people or things.", synonyms: ["pair", "couple"] },
   { word: "Duplication", partOfSpeech: "noun", definition: "The action of duplicating something.", synonyms: ["copying", "repetition"] },
   { word: "Durability", partOfSpeech: "noun", definition: "The ability to withstand wear.", synonyms: ["strength", "toughness"] },
   { word: "Duration", partOfSpeech: "noun", definition: "The time during which something continues.", synonyms: ["period", "length"] },
   { word: "Dusk", partOfSpeech: "noun", definition: "The darker stage of twilight.", synonyms: ["twilight", "sunset"] },
-  { word: "Dust", partOfSpeech: "noun", definition: "Fine, dry powder consisting of tiny particles.", synonyms: ["grime", "dirt"] },
+  { word: "Strategy", partOfSpeech: "noun", definition: "A careful plan designed to achieve a long-term goal.", synonyms: ["plan", "approach"] },
   { word: "Duty", partOfSpeech: "noun", definition: "A moral or legal obligation.", synonyms: ["obligation", "responsibility"] }
 ];
 
 
 
-export const getWordBatch = async (count: number): Promise<WordChallenge[]> => {
-  const array = [...WORD_BANK];
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array.slice(0, count);
+export const getWordBatch = async (
+  count: number,
+  options?: { uid?: string; practicedWords?: string[] }
+): Promise<WordChallenge[]> => {
+  const scope = `wordsmith_${options?.uid || 'guest'}`;
+  const extraSeen = (options?.practicedWords || []).map((w) => w.toLowerCase());
+  const { selected } = drawUnseenFromStorage(
+    scope,
+    WORD_BANK,
+    (item) => item.word.toLowerCase(),
+    count,
+    extraSeen
+  );
+  return selected;
 };
 
 const cleanWordToken = (raw: string) =>

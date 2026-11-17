@@ -1,23 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   Check,
   X,
   Lightbulb,
   Loader2,
-  Download,
-  Share2,
   RotateCcw,
   TrendingUp,
   TrendingDown,
   Award,
-  Send,
   Timer
 } from 'lucide-react';
-import { toCanvas } from 'html-to-image';
-import { useAuth } from '../../../hooks/useAuth';
-import { sendToDiscord } from '../services/discordService';
-import { resolvePortalReportTargets } from '../../../k12/guardianLinkService';
 import { QuizResult, Question, UserAnswer, DIFFICULTY_CONFIGS } from '../types';
+import ReportActions from '../../../k12/ReportActions';
 import type { ActivityRewardOutcome } from '../../../k12/rewards';
 import RewardBanner from '../../../k12/RewardBanner';
 import { BackButton, DIFF_EMOJI } from './ui';
@@ -84,14 +78,9 @@ function ReviewItem({ question, idx, ans }: { question: Question; idx: number; a
 }
 
 export default function ResultScreen({ results, questions, isFeedbackLoading, language, rewardOutcome, onRetry, onDone }: Props) {
-  const { user } = useAuth();
   const reportRef = useRef<HTMLDivElement>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [reportStatus, setReportStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
-  const [reportError, setReportError] = useState('');
-  const autoSentRef = useRef(false);
 
-  const percentage = (results.score / results.totalQuestions) * 100;
+  const percentage = results.totalQuestions > 0 ? (results.score / results.totalQuestions) * 100 : 0;
   const correctedCount = useMemo(
     () => results.answers.filter((a) => a.isCorrect && a.attempts === 2).length,
     [results.answers]
@@ -109,106 +98,11 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
   );
   const rec = results.levelRecommendation;
 
-  const generateImageCanvas = async (): Promise<HTMLCanvasElement | null> => {
-    if (!reportRef.current) return null;
-    setIsCapturing(true);
-    try {
-      await new Promise((r) => setTimeout(r, 150));
-      return await toCanvas(reportRef.current, { pixelRatio: 2, backgroundColor: '#FFF8EC' });
-    } catch (error) {
-      console.error('Failed to capture results:', error);
-      return null;
-    } finally {
-      setIsCapturing(false);
-    }
-  };
-
-  // Auto-send the report to the guardian / Discord webhook once (same logic as the original app).
-  // Waits for the AI feedback so the image includes it.
-  useEffect(() => {
-    if (!user || autoSentRef.current) return;
-    if (isFeedbackLoading || !results.feedback) return;
-    autoSentRef.current = true;
-
-    const autoSendReport = async () => {
-      setReportStatus('sending');
-      try {
-        const fallbackName = user.email?.split('@')[0] || 'Unknown Student';
-        const { targets, senderName } = await resolvePortalReportTargets(user, fallbackName);
-        if (targets.length === 0) {
-          setReportStatus('idle');
-          return;
-        }
-
-        const canvas = await generateImageCanvas();
-        if (!canvas) {
-          setReportStatus('error');
-          setReportError('Screenshot failed');
-          return;
-        }
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (!blob) throw new Error('Blob conversion failed');
-
-        const outcomes = await Promise.all(
-          targets.map((target) =>
-            sendToDiscord(
-              target.webhookUrl,
-              blob,
-              target.isGuardian ? `${senderName} (Student Link)` : senderName
-            )
-          )
-        );
-        const firstSuccess = outcomes.some((o) => o.success);
-        if (!firstSuccess) {
-          throw new Error(outcomes[0]?.error || 'Unknown error');
-        }
-        setReportStatus('success');
-      } catch (e: any) {
-        console.error('Webhook processing error:', e);
-        setReportStatus('error');
-        setReportError(e?.message || 'Unknown processing error');
-      }
-    };
-
-    autoSendReport();
-  }, [user, isFeedbackLoading, results.feedback]);
-
-  const handleSaveImage = async () => {
-    const canvas = await generateImageCanvas();
-    if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = `MathGenius-Grade6-Result-${Date.now()}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  };
-
-  const handleShare = async () => {
-    const canvas = await generateImageCanvas();
-    if (!canvas) return;
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], 'MathResult.png', { type: 'image/png' });
-      if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'My MathGenius Grade 6 Result',
-            text: `I scored ${results.score}/${results.totalQuestions} on MathGenius in ${formatTime(results.timeTaken)}!`
-          });
-        } catch (error: any) {
-          if (error?.name !== 'AbortError') handleSaveImage();
-        }
-      } else {
-        handleSaveImage();
-      }
-    }, 'image/png');
-  };
-
   return (
     <>
       <BackButton onClick={onDone} />
 
-      <div ref={reportRef} className="mt-6 space-y-5 p-1">
+      <div ref={reportRef} className="mt-6 space-y-5 p-2 rounded-3xl">
         {/* Score */}
         <div className="chunky bg-sky-100 p-6 sm:p-8 text-center">
           <div className="text-6xl" aria-hidden="true">
@@ -235,8 +129,6 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
           </div>
           <p className="text-xs font-bold text-slate-600 mt-3">{results.date}</p>
         </div>
-
-        <RewardBanner outcome={rewardOutcome ?? null} />
 
         {/* AI feedback */}
         <div className="bg-white rounded-3xl border-[3px] border-ink p-5" aria-live="polite">
@@ -297,64 +189,36 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
             ))}
           </ul>
         </div>
+
+        <p className="text-center text-xs font-extrabold text-slate-500 pt-2 tracking-widest">
+          K12.VANPOWER.LIVE
+        </p>
       </div>
 
-      {/* Report status + image actions */}
-      <div className="flex flex-wrap items-center gap-2.5 mt-6">
-        {reportStatus === 'sending' && (
-          <span className="inline-flex items-center gap-1.5 font-bold text-slate-700" role="status">
-            <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" /> 正在发送报告…
-          </span>
-        )}
-        {reportStatus === 'success' && (
-          <span className="inline-flex items-center gap-1.5 font-bold text-emerald-800" role="status">
-            <Send className="w-4 h-4" aria-hidden="true" /> 报告已发送
-          </span>
-        )}
-        {reportStatus === 'error' && (
-          <span className="inline-flex items-center gap-1.5 font-bold text-rose-800" role="status" title={reportError}>
-            <X className="w-4 h-4" aria-hidden="true" /> 报告发送失败
-          </span>
-        )}
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={handleSaveImage}
-          disabled={isCapturing}
-          className="px-4 py-2 rounded-full border-[3px] border-ink bg-white font-extrabold inline-flex items-center gap-1.5 hover:bg-yellow-50 disabled:opacity-50"
-        >
-          <Download className="w-4 h-4" aria-hidden="true" /> 存图
-        </button>
-        <button
-          type="button"
-          onClick={handleShare}
-          disabled={isCapturing}
-          className="px-4 py-2 rounded-full border-[3px] border-ink bg-white font-extrabold inline-flex items-center gap-1.5 hover:bg-yellow-50 disabled:opacity-50"
-        >
-          <Share2 className="w-4 h-4" aria-hidden="true" /> 分享
-        </button>
-      </div>
+      <RewardBanner outcome={rewardOutcome ?? null} />
 
       <div className="grid grid-cols-2 gap-4 mt-6">
         <button
           type="button"
           onClick={onRetry}
-          className="chunky bg-white py-4 text-xl font-black flex items-center justify-center gap-2"
+          className="chunky bg-yellow-300 py-4 text-xl font-black flex items-center justify-center gap-2"
         >
           <RotateCcw className="w-5 h-5" aria-hidden="true" /> 再来一次
         </button>
-        <button type="button" onClick={onDone} className="chunky bg-yellow-300 py-4 text-xl font-black">
+        <button type="button" onClick={onDone} className="chunky bg-white py-4 text-xl font-black">
           完成
         </button>
       </div>
 
-      {isCapturing && (
-        <div className="fixed inset-0 z-50 bg-white/70 grid place-items-center" role="status">
-          <div className="chunky bg-white px-6 py-5 flex items-center gap-3 font-black">
-            <Loader2 className="w-6 h-6 motion-safe:animate-spin" aria-hidden="true" /> 生成图片中…
-          </div>
-        </div>
-      )}
+      <ReportActions
+        reportRef={reportRef}
+        backgroundColor="#FFF8EC"
+        ready={!isFeedbackLoading && Boolean(results.feedback)}
+        subjectLabel="MathGenius · 数学自适应闯关"
+        scoreSummary={`${results.score}/${results.totalQuestions} 题（${Math.round(percentage)}%）`}
+        filePrefix="MathGenius-Report"
+        sessionKey={results.date}
+      />
     </>
   );
 }

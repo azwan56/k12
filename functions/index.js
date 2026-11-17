@@ -63,11 +63,62 @@ async function generateWithFallback(ai, options, label = "K12") {
   throw lastError || new Error("All Gemini models failed");
 }
 
-function getPromptsForCategory(category, language, difficulty = "standard", weakPoints = []) {
+const MATH_SCENARIO_THEMES = [
+  "space exploration & satellite orbits",
+  "school robotics & 3D printing club",
+  "marine biology & coral conservation",
+  "sustainable architecture & green cities",
+  "swimming & track athletics statistics",
+  "culinary arts & bakery scaling",
+  "botanical garden & greenhouse experiments",
+  "archaeology museum & ancient artifacts",
+  "high-speed rail & transit timetables",
+  "solar & wind renewable energy microgrids",
+  "campus book fair & library inventory",
+  "mountain weather station & climate data"
+];
+
+function pickDistinctThemes() {
+  const pool = [...MATH_SCENARIO_THEMES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return [pool[0], pool[1]];
+}
+
+function getPromptsForCategory(
+  category,
+  language,
+  difficulty = "standard",
+  weakPoints = [],
+  recentQuestions = []
+) {
   const isZh = language === "zh";
   const langReq = isZh
     ? "- All text (questions, options, explanations, category names) MUST be strictly written in Simplified Chinese."
     : "- All text (questions, options, explanations, category names) MUST be in English.";
+
+  const [theme1, theme2] = pickDistinctThemes();
+  const cleanRecent = Array.isArray(recentQuestions)
+    ? recentQuestions
+        .filter((s) => typeof s === "string")
+        .map((s) => s.replace(/\s+/g, " ").trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 20)
+    : [];
+
+  const antiRepeatDirective =
+    cleanRecent.length > 0
+      ? isZh
+        ? `\n- 【严禁出重复题】：学生近期已做过以下题干，请务必避开这些题目及仅替换数字的雷同题，确保情景、提问方式与考察角度全新：\n  ${cleanRecent.map((q, i) => `${i + 1}. ${q}`).join("\n  ")}`
+        : `\n- [AVOID REPEATING RECENT QUESTIONS]: Do NOT repeat or merely swap numbers from these recently seen question stems; invent fresh scenarios and angles:\n  ${cleanRecent.map((q, i) => `${i + 1}. ${q}`).join("\n  ")}`
+      : "";
+
+  const variationDirective = (theme) =>
+    isZh
+      ? `\n- 【情境多样性】：本次请优先结合「${theme}」等真实跨学科场景出题，避免陈旧套路化数字。`
+      : `\n- [FRESH CONTEXT SEED]: Ground word problems creatively around "${theme}" where appropriate so each practice set feels fresh.`;
 
   let difficultyDirective = "";
   if (difficulty === "foundation") {
@@ -92,6 +143,8 @@ function getPromptsForCategory(category, language, difficulty = "standard", weak
       : `\n- [TARGETED WEAK-POINT DRILL]: The student recently made errors in these topics: [${listStr}]. Please allocate at least 60% of questions specifically to reinforce and remediate these weak points from varied angles.`;
   }
 
+  const sharedTail = (theme) => `${variationDirective(theme)}${antiRepeatDirective}`;
+
   switch (category) {
     case "ratios_percentages":
       return [
@@ -103,7 +156,7 @@ Topics to cover:
 4. Scale drawings and scale factor.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -118,7 +171,7 @@ Topics to cover:
 4. Percent of increase and decrease.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -135,7 +188,7 @@ Topics to cover:
 3. Multi-step operations with fractions and mixed numbers.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -149,7 +202,7 @@ Topics to cover:
 3. Multi-step real-world problem solving with fractions and decimals.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -166,7 +219,7 @@ Topics to cover:
 3. Applying properties of operations to generate equivalent expressions (distributive property, combining like terms).
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -180,7 +233,7 @@ Topics to cover:
 3. Writing and interpreting simple inequalities (x > c, x <= c) to represent conditions in real-world problems.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -198,7 +251,7 @@ Topics to cover:
 4. Finding area or perimeter of semicircles and composite circle shapes.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Use 3.14 or 22/7 for pi when needed.
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
@@ -213,7 +266,7 @@ Topics to cover:
 3. Using nets made up of rectangles and triangles to find the surface area of 3D figures.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -231,7 +284,7 @@ Topics to cover:
 4. Comparing and ordering rational numbers, including negative numbers.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -246,7 +299,7 @@ Topics to cover:
 4. Reflecting points across the x-axis or y-axis.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -263,7 +316,7 @@ ${difficultyDirective}${weakPointsDirective}
 3. Writing and evaluating algebraic expressions with variables and exponents.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme1)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -276,7 +329,7 @@ ${difficultyDirective}${weakPointsDirective}
 3. Negative integers, absolute value, and the four-quadrant coordinate plane.
 Requirements:
 ${langReq}
-${difficultyDirective}${weakPointsDirective}
+${difficultyDirective}${weakPointsDirective}${sharedTail(theme2)}
 - Each question must have 4 distinct options with exactly one correct answer.
 - Provide a concise "hint" (解题思路与思考方向) that guides the student's problem-solving thinking without revealing the actual correct answer or option.
 - Provide a detailed step-by-step explanation.
@@ -303,13 +356,21 @@ exports.generateMathQuestions = onCall(
       language = "en",
       category = "all",
       difficulty = "standard",
-      weakPoints = []
+      weakPoints = [],
+      recentQuestions = []
     } = request.data || {};
     const ai = new GoogleGenAI({ apiKey });
 
-    const [prompt1, prompt2] = getPromptsForCategory(category, language, difficulty, weakPoints);
+    const [prompt1, prompt2] = getPromptsForCategory(
+      category,
+      language,
+      difficulty,
+      weakPoints,
+      recentQuestions
+    );
 
     const config = {
+      temperature: 0.85,
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.ARRAY,
@@ -337,7 +398,19 @@ exports.generateMathQuestions = onCall(
 
       const questions1 = parseLLMJSON(response1.text || "[]");
       const questions2 = parseLLMJSON(response2.text || "[]");
-      return { questions: [...questions1, ...questions2] };
+      const seenStems = new Set();
+      const merged = [];
+      for (const item of [...questions1, ...questions2]) {
+        if (!item || typeof item.question !== "string") continue;
+        const norm = item.question.replace(/\s+/g, " ").trim().toLowerCase();
+        if (!norm || seenStems.has(norm)) continue;
+        seenStems.add(norm);
+        merged.push({
+          ...item,
+          id: `q_${merged.length + 1}`
+        });
+      }
+      return { questions: merged };
     } catch (error) {
       console.error("Failed to generate Grade 6 math questions:", error);
       throw new HttpsError("internal", "Failed to generate math questions.");

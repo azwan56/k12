@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { User } from 'firebase/auth';
-import { toBlob } from 'html-to-image';
-import { Check, Download, Send, Share2, Star, X } from 'lucide-react';
+import { Star } from 'lucide-react';
 import { BatchResult, SessionRecord } from '../types';
-import { resolveReportTarget, sendReport, type ReportTarget } from '../services/reportService';
+import ReportActions from '../../../k12/ReportActions';
 import type { ActivityRewardOutcome } from '../../../k12/rewards';
 import RewardBanner from '../../../k12/RewardBanner';
-import { BackButton, Spinner, Stars } from './ui';
+import { BackButton, Stars } from './ui';
 
 interface Props {
   results: BatchResult[];
@@ -18,13 +17,16 @@ interface Props {
   onRestart: () => void;
 }
 
-type SendStatus = 'idle' | 'sending' | 'success' | 'error';
-
-export default function BatchSummary({ results, history, isCustomMode, user, userName, rewardOutcome, onRestart }: Props) {
+export default function BatchSummary({
+  results,
+  history,
+  isCustomMode,
+  user: _user,
+  userName,
+  rewardOutcome,
+  onRestart,
+}: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
-  const [target, setTarget] = useState<ReportTarget>(null);
-  const [isSharing, setIsSharing] = useState(false);
-  const [sendStatus, setSendStatus] = useState<SendStatus>('idle');
 
   const scoredResults = results.filter((r) => !r.evaluation.isFallback);
   const total = scoredResults.reduce((acc, r) => acc + r.evaluation.score, 0);
@@ -36,85 +38,8 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
     0
   );
 
-  const generateBlob = async (): Promise<Blob | null> => {
-    if (!reportRef.current) return null;
-    try {
-      return await toBlob(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff', cacheBust: true });
-    } catch (e) {
-      console.error('Error generating image:', e);
-      return null;
-    }
-  };
-
-  const download = (blob: Blob) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.download = 'WordSmith-Practice.png';
-    link.href = url;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const handleShare = async () => {
-    setIsSharing(true);
-    try {
-      const blob = await generateBlob();
-      if (!blob) return;
-      const file = new File([blob], 'WordSmith-Practice.png', { type: 'image/png' });
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'WordSmith.VanPower Results',
-            text: 'I just practiced my vocabulary list on WordSmith.VanPower!'
-          });
-        } catch (err) {
-          if ((err as Error).name !== 'AbortError') console.error('Share failed', err);
-        }
-      } else {
-        download(blob);
-      }
-    } finally {
-      setIsSharing(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    setIsSharing(true);
-    const blob = await generateBlob();
-    if (blob) download(blob);
-    setIsSharing(false);
-  };
-
-  // Read-only lookup: only show "发给家长" when a webhook is resolvable. Never auto-send.
-  useEffect(() => {
-    let cancelled = false;
-    resolveReportTarget(user, userName)
-      .then((t) => {
-        if (!cancelled) setTarget(t);
-      })
-      .catch((e) => {
-        console.error('Report target lookup failed:', e);
-        if (!cancelled) setTarget(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user.uid, userName]);
-
-  const handleSend = async () => {
-    if (!target) return;
-    setSendStatus('sending');
-    try {
-      if (document.fonts?.ready) await document.fonts.ready;
-      const blob = await generateBlob();
-      if (!blob) throw new Error('Screenshot failed');
-      setSendStatus((await sendReport(target, blob)) ? 'success' : 'error');
-    } catch (e) {
-      console.error('Report send failed:', e);
-      setSendStatus('error');
-    }
-  };
+  const subjectLabel = isCustomMode ? 'WordSmith · 自定义词汇造句' : 'WordSmith · 随机词汇造句';
+  const scoreSummary = max > 0 ? `${total}/${max} 星` : `${results.length} 词`;
 
   return (
     <>
@@ -169,29 +94,6 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
 
       <RewardBanner outcome={rewardOutcome ?? null} />
 
-      {sendStatus !== 'idle' && (
-        <p className="mt-4 flex items-center justify-center gap-2 font-extrabold" role="status">
-          {sendStatus === 'sending' && (
-            <>
-              <Spinner className="w-4 h-4" /> 正在发送报告…
-            </>
-          )}
-          {sendStatus === 'success' && (
-            <>
-              <Check className="w-5 h-5" strokeWidth={3} aria-hidden="true" /> 报告已发送
-            </>
-          )}
-          {sendStatus === 'error' && (
-            <>
-              <X className="w-5 h-5" strokeWidth={3} aria-hidden="true" /> 发送失败
-              <button type="button" onClick={handleSend} className="underline ml-1">
-                重试
-              </button>
-            </>
-          )}
-        </p>
-      )}
-
       <button
         type="button"
         onClick={onRestart}
@@ -200,35 +102,13 @@ export default function BatchSummary({ results, history, isCustomMode, user, use
         {isCustomMode ? '完成' : '再来一组'}
       </button>
 
-      <div className="grid grid-cols-2 gap-4 mt-4">
-        <button
-          type="button"
-          onClick={handleShare}
-          disabled={isSharing}
-          className="chunky bg-white py-3 font-black flex items-center justify-center gap-2 disabled:opacity-50"
-        >
-          <Share2 className="w-5 h-5" aria-hidden="true" /> 分享
-        </button>
-        <button
-          type="button"
-          onClick={handleDownload}
-          disabled={isSharing}
-          className="chunky bg-white py-3 font-black flex items-center justify-center gap-2 disabled:opacity-50"
-        >
-          <Download className="w-5 h-5" aria-hidden="true" /> 保存图片
-        </button>
-      </div>
-
-      {target && (
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={sendStatus === 'sending' || sendStatus === 'success'}
-          className="chunky bg-white w-full mt-4 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-50"
-        >
-          <Send className="w-5 h-5" aria-hidden="true" /> 发给家长
-        </button>
-      )}
+      <ReportActions
+        reportRef={reportRef}
+        subjectLabel={subjectLabel}
+        scoreSummary={scoreSummary}
+        filePrefix="WordSmith-Practice"
+        sessionKey={history[0]?.id || 'ws'}
+      />
     </>
   );
 }

@@ -88,7 +88,11 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
     setIsCustomMode(false);
     resetBatch();
     try {
-      const batch = await getWordBatch(DEFAULT_BATCH_SIZE);
+      const practicedWords = history.flatMap((s) => s.results.map((r) => r.wordChallenge.word));
+      const batch = await getWordBatch(DEFAULT_BATCH_SIZE, {
+        uid: user?.uid,
+        practicedWords,
+      });
       setWordBatch(batch);
       setAppState('playing');
     } catch (error) {
@@ -217,6 +221,11 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   const handleClearHistory = () => {
     if (user && window.confirm('确定清除你的练习记录吗？无法恢复。')) {
       setHistory(clearUserHistory(user.uid));
+      try {
+        localStorage.removeItem(`k12_qdeck_v1_wordsmith_${user.uid}`);
+      } catch {
+        // Ignore storage errors
+      }
     }
   };
 
