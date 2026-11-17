@@ -11,14 +11,18 @@ import { Question, UserAnswer, DifficultyLevel } from "../types";
 
 function buildLocalFallbackMathQuestions(
   language: 'en' | 'zh',
+  difficulty: DifficultyLevel = 'standard',
   uid?: string
 ): Question[] {
-  const sourcePool =
+  const gradePool =
     language === 'zh'
       ? SHANGHAI_MATH_QUESTIONS.filter((item) => item.grade === 'G6')
       : IG_MATH_QUESTIONS.filter((item) => item.grade === 'G6');
+  const tierPool = gradePool.filter((item) => item.difficulty === difficulty);
+  const sourcePool = tierPool.length > 0 ? tierPool : gradePool;
+
   const { selected } = drawUnseenFromStorage(
-    `mg_fallback_${uid || 'guest'}_${language}`,
+    `mg_fallback_${uid || 'guest'}_${language}_${difficulty}`,
     sourcePool,
     (item) => item.id,
     10
@@ -36,7 +40,7 @@ function buildLocalFallbackMathQuestions(
           ? '先列出已知条件与数量关系，分步计算并仔细验算。'
           : 'Identify the known values and write down each step carefully before calculating.',
       explanation: item.explanation,
-      category: language === 'zh' ? '六年级数学精选' : 'Grade 6 Math Practice',
+      category: item.topic || (language === 'zh' ? '六年级数学精选' : 'Grade 6 Math Practice'),
     };
   });
   rememberRecentMathStems(
@@ -88,7 +92,7 @@ export const generateMathQuestions = async (
     throw new Error("Empty questions returned from backend.");
   } catch (error) {
     console.warn("Cloud Function unavailable for MathGenius, falling back to local unseen bank:", error);
-    return buildLocalFallbackMathQuestions(language, uid);
+    return buildLocalFallbackMathQuestions(language, difficulty, uid);
   }
 };
 

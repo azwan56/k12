@@ -11,7 +11,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { SUBJECTS, SubjectId, gradeLabel } from '../data/k12Subjects';
+import {
+  PRACTICE_DIFFICULTY_META,
+  type PracticeDifficulty,
+  SUBJECTS,
+  SubjectId,
+  gradeLabel,
+} from '../data/k12Subjects';
 import { DIFFICULTY_CONFIGS, DifficultyLevel, GRADE_6_CATEGORIES } from '../apps/mathgenius/types';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
@@ -94,6 +100,10 @@ function resolveMathCategoryLabel(id: string): string {
 }
 
 function resolveMathDifficultyLabel(level: string): string {
+  if (level === 'mixed') return '智能混合梯度';
+  if (level in PRACTICE_DIFFICULTY_META) {
+    return PRACTICE_DIFFICULTY_META[level as PracticeDifficulty].label;
+  }
   if (level in DIFFICULTY_CONFIGS) {
     return DIFFICULTY_CONFIGS[level as DifficultyLevel].labelZh;
   }

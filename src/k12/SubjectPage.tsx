@@ -1,12 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Play } from 'lucide-react';
-import { Subject, GradeLevel } from '../data/k12Subjects';
+import {
+  Subject,
+  GradeLevel,
+  PracticeDifficulty,
+  PRACTICE_DIFFICULTY_META,
+} from '../data/k12Subjects';
 import { THEME, replaceQuery } from './ui';
+
+export type DifficultyFilter = 'all' | PracticeDifficulty;
+
+export function parseDifficultyFilter(val?: string | null): DifficultyFilter {
+  if (val === 'foundation' || val === 'standard' || val === 'challenge') {
+    return val;
+  }
+  return 'all';
+}
 
 interface Props {
   subject: Subject;
   grade: GradeLevel;
   initialTrack: string | null;
+  initialDifficulty?: string | null;
 }
 
 export function BackLink({ href, label = '返回' }: { href: string; label?: string }) {
@@ -18,27 +33,57 @@ export function BackLink({ href, label = '返回' }: { href: string; label?: str
   );
 }
 
-export default function SubjectPage({ subject, grade, initialTrack }: Props) {
+export default function SubjectPage({ subject, grade, initialTrack, initialDifficulty }: Props) {
   const theme = THEME[subject.id];
   const tracks = subject.tracks?.[grade] ?? [];
 
   const pickTrack = (id: string | null) =>
     tracks.find((t) => t.id === id)?.id ?? tracks[0]?.id ?? null;
   const [trackId, setTrackId] = useState<string | null>(() => pickTrack(initialTrack));
+  const [difficulty, setDifficulty] = useState<DifficultyFilter>(() =>
+    parseDifficultyFilter(initialDifficulty)
+  );
 
   // Grade switch may change the available tracks.
   useEffect(() => {
     setTrackId((cur) => pickTrack(cur));
   }, [grade]);
 
+  const syncQuery = (nextTrack: string | null, nextDiff: DifficultyFilter) => {
+    const params: Record<string, string> = {};
+    if (nextTrack) params.t = nextTrack;
+    if (nextDiff !== 'all') params.d = nextDiff;
+    replaceQuery(['s', subject.id], params);
+  };
+
   const selectTrack = (id: string) => {
     setTrackId(id);
-    replaceQuery(['s', subject.id], { t: id });
+    syncQuery(id, difficulty);
+  };
+
+  const selectDifficulty = (nextDiff: DifficultyFilter) => {
+    setDifficulty(nextDiff);
+    syncQuery(trackId, nextDiff);
   };
 
   const track = tracks.find((t) => t.id === trackId);
   const topics = track ? track.topics : subject.topics[grade];
-  const practiceHref = `#/s/${subject.id}/practice${track ? `?t=${track.id}` : ''}`;
+
+  const poolQuestions = subject.questions.filter(
+    (q) => q.grade === grade && (!track || q.track === track.id)
+  );
+  const hasDifficultyTiers = poolQuestions.some((q) => Boolean(q.difficulty));
+  const tierCounts: Record<PracticeDifficulty, number> = {
+    foundation: poolQuestions.filter((q) => q.difficulty === 'foundation').length,
+    standard: poolQuestions.filter((q) => q.difficulty === 'standard').length,
+    challenge: poolQuestions.filter((q) => q.difficulty === 'challenge').length,
+  };
+
+  const practiceParams = new URLSearchParams();
+  if (track) practiceParams.set('t', track.id);
+  if (hasDifficultyTiers && difficulty !== 'all') practiceParams.set('d', difficulty);
+  const practiceQs = practiceParams.toString();
+  const practiceHref = `#/s/${subject.id}/practice${practiceQs ? `?${practiceQs}` : ''}`;
 
   return (
     <>
@@ -51,9 +96,16 @@ export default function SubjectPage({ subject, grade, initialTrack }: Props) {
         >
           {subject.emoji}
         </span>
-        <div>
-          <h1 className="text-4xl font-black">{subject.name}</h1>
-          <p className={`font-bold ${theme.text}`}>{subject.short[grade]}</p>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-4xl font-black">{subject.name}</h1>
+            {poolQuestions.length > 0 && (
+              <span className="px-3 py-1 rounded-full border-2 border-ink bg-yellow-100 text-xs font-black tabular-nums">
+                📚 本年级题库共 {poolQuestions.length} 题
+              </span>
+            )}
+          </div>
+          <p className={`font-bold mt-0.5 ${theme.text}`}>{subject.short[grade]}</p>
         </div>
       </div>
 
@@ -112,6 +164,51 @@ export default function SubjectPage({ subject, grade, initialTrack }: Props) {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Difficulty Tier Selector */}
+      {hasDifficultyTiers && (
+        <div className="mt-8">
+          <p className="text-sm font-black text-slate-600 mb-2.5">选择难度梯度</p>
+          <div role="group" aria-label="选择难度梯度" className="flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              aria-pressed={difficulty === 'all'}
+              onClick={() => selectDifficulty('all')}
+              className={`px-4 py-2 rounded-2xl border-[3px] border-ink font-extrabold text-sm sm:text-base transition-colors ${
+                difficulty === 'all'
+                  ? 'bg-yellow-300 shadow-[3px_3px_0_var(--color-ink)]'
+                  : 'bg-white hover:bg-yellow-50'
+              }`}
+            >
+              🎯 智能混合（{poolQuestions.length} 题 · 循序渐进）
+            </button>
+            {(['foundation', 'standard', 'challenge'] as PracticeDifficulty[]).map((tier) => {
+              const meta = PRACTICE_DIFFICULTY_META[tier];
+              const active = difficulty === tier;
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => selectDifficulty(tier)}
+                  className={`px-4 py-2 rounded-2xl border-[3px] border-ink font-extrabold text-sm sm:text-base transition-colors ${
+                    active
+                      ? `${meta.badgeClass} shadow-[3px_3px_0_var(--color-ink)]`
+                      : 'bg-white hover:bg-yellow-50'
+                  }`}
+                >
+                  {meta.emoji} {meta.label}（{tierCounts[tier]} 题）
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs font-bold text-slate-600 mt-2">
+            {difficulty === 'all'
+              ? '每组自动按“3 道基础 → 3 道进阶 → 2 道竞赛培优”渐进抽题，优先抽取未做过的新题。'
+              : PRACTICE_DIFFICULTY_META[difficulty].desc}
+          </p>
         </div>
       )}
 

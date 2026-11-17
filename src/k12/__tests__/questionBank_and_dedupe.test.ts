@@ -1,6 +1,11 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { ESSAY_PROMPTS, SUBJECTS, type GradeLevel } from '../../data/k12Subjects';
+import {
+  ESSAY_PROMPTS,
+  SUBJECTS,
+  type GradeLevel,
+  type PracticeDifficulty,
+} from '../../data/k12Subjects';
 import {
   drawUnseenFromStorage,
   getRecentMathStems,
@@ -10,8 +15,9 @@ import {
 } from '../questionDedupe';
 
 describe('Expanded K12 question banks and essay prompts', () => {
-  it('provides at least 25 distinct valid questions in every subject/grade/track pool and >= 430 total', () => {
+  it('provides at least 25 distinct valid questions in every subject/grade/track pool and >= 900 total', () => {
     const globalIds = new Set<string>();
+    const draftRe = /\b(?:Wait:|TODO\b|FIXME\b)|再算|不对|等等/;
     let totalQuestions = 0;
 
     for (const subj of SUBJECTS) {
@@ -20,6 +26,9 @@ describe('Expanded K12 question banks and essay prompts', () => {
         totalQuestions += 1;
         assert.equal(globalIds.has(q.id), false, `Duplicate question id: ${q.id}`);
         globalIds.add(q.id);
+
+        assert.equal(draftRe.test(q.question), false, `${q.id} contains draft note in question`);
+        assert.equal(draftRe.test(q.explanation), false, `${q.id} contains draft note in explanation`);
 
         const normText = q.question.replace(/\s+/g, ' ').trim().toLowerCase();
         assert.equal(
@@ -59,7 +68,40 @@ describe('Expanded K12 question banks and essay prompts', () => {
       }
     }
 
-    assert.ok(totalQuestions >= 430, `Expected >= 430 total questions, got ${totalQuestions}`);
+    assert.ok(totalQuestions >= 900, `Expected >= 900 total questions, got ${totalQuestions}`);
+  });
+
+  it('provides 300+ multi-tier non-template math questions in both ig-math and shanghai-math', () => {
+    const diffs: PracticeDifficulty[] = ['foundation', 'standard', 'challenge'];
+    const mathDraftRe = /\b(Wait|Let us|TODO|FIXME)\b|再算|不对|等等/i;
+    for (const mathId of ['ig-math', 'shanghai-math'] as const) {
+      const subj = SUBJECTS.find((s) => s.id === mathId);
+      assert.ok(subj, `Missing subject ${mathId}`);
+      assert.ok(subj.questions.length >= 300, `${mathId} expected >= 300 questions, got ${subj.questions.length}`);
+
+      const skeletonCounts = new Map<string, number>();
+      for (const q of subj.questions) {
+        assert.equal(mathDraftRe.test(q.question), false, `${mathId} ${q.id} draft note in question`);
+        assert.equal(mathDraftRe.test(q.explanation), false, `${mathId} ${q.id} draft note in explanation`);
+        assert.ok(q.topic && q.topic.trim().length > 0, `${mathId} ${q.id} missing topic`);
+        assert.ok(q.difficulty && diffs.includes(q.difficulty), `${mathId} ${q.id} missing difficulty`);
+        const skel = q.question.replace(/\d+(\.\d+)?/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
+        skeletonCounts.set(skel, (skeletonCounts.get(skel) ?? 0) + 1);
+      }
+
+      for (const [skel, count] of skeletonCounts.entries()) {
+        assert.ok(count <= 2, `${mathId} skeleton repeated ${count} times: "${skel}"`);
+      }
+
+      for (const grade of ['G6', 'G7'] as GradeLevel[]) {
+        const gPool = subj.questions.filter((q) => q.grade === grade);
+        assert.ok(gPool.length >= 150, `${mathId} ${grade} expected >= 150, got ${gPool.length}`);
+        for (const d of diffs) {
+          const dPool = gPool.filter((q) => q.difficulty === d);
+          assert.ok(dPool.length >= 50, `${mathId} ${grade}/${d} expected >= 50, got ${dPool.length}`);
+        }
+      }
+    }
   });
 
   it('provides at least 12 distinct essay prompts (6 per grade)', () => {

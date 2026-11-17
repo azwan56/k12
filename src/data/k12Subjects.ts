@@ -6,11 +6,41 @@ import { SHANGHAI_MATH_QUESTIONS } from './questionBanks/shanghaiMathQuestions';
 
 export type SubjectId = 'english' | 'ig-math' | 'shanghai-math' | 'humanity' | 'science';
 export type GradeLevel = 'G6' | 'G7';
+export type PracticeDifficulty = 'foundation' | 'standard' | 'challenge';
+
+export const PRACTICE_DIFFICULTY_META: Record<
+  PracticeDifficulty,
+  { label: string; shortLabel: string; emoji: string; badgeClass: string; desc: string }
+> = {
+  foundation: {
+    label: '基础巩固',
+    shortLabel: '基础',
+    emoji: '🌱',
+    badgeClass: 'bg-emerald-100 text-emerald-900',
+    desc: '核心概念与基本运算达标',
+  },
+  standard: {
+    label: '课标进阶',
+    shortLabel: '进阶',
+    emoji: '🚀',
+    badgeClass: 'bg-sky-100 text-sky-900',
+    desc: '多步综合应用与同步提高',
+  },
+  challenge: {
+    label: '竞赛培优',
+    shortLabel: '培优',
+    emoji: '🏆',
+    badgeClass: 'bg-violet-100 text-violet-900',
+    desc: 'AMC 8 / UKMT / 一课一练★拓展压轴',
+  },
+};
 
 export interface PracticeQuestion {
   id: string;
   grade: GradeLevel;
   track?: string;
+  difficulty?: PracticeDifficulty;
+  topic?: string;
   question: string;
   options: string[];
   answer: number;
@@ -67,10 +97,10 @@ export const SUBJECTS: Subject[] = [
     name: 'IG Math',
     nameZh: '国际数学',
     emoji: '🧮',
-    short: { G6: '比例、百分数、代数入门', G7: '方程、函数图像、几何' },
+    short: { G6: 'Stage 7 · 比例/代数/UKMT培优', G7: 'Stage 8 · 函数/几何/AMC8培优' },
     topics: {
-      G6: ['Ratios & %', 'Algebra Basics', 'Area & Perimeter', 'Probability'],
-      G7: ['Linear Equations', 'Straight-Line Graphs', 'Angles', 'Volume & Data']
+      G6: ['Primes & Negatives', 'FDP & Ratios', 'Algebra & Sequences', 'Area, Volume & Prisms', 'Data, Sets & Probability'],
+      G7: ['Indices & Standard Form', 'Brackets & Simultaneous Eq.', 'Linear Graphs y=mx+c', 'Pythagoras, Circles & Polygons', 'Compound %, Scale & Tree Probability']
     },
     questions: IG_MATH_QUESTIONS
   },
@@ -79,10 +109,10 @@ export const SUBJECTS: Subject[] = [
     name: '上海数学',
     nameZh: '沪教版',
     emoji: '📐',
-    short: { G6: '分数、比例、圆与方程', G7: '整式、分式、几何证明' },
+    short: { G6: '五四制 · 有理数/比例/圆与方程', G7: '五四制 · 整式/分式/全等与不等式' },
     topics: {
-      G6: ['数的整除', '比和比例', '圆与扇形', '一元一次方程'],
-      G7: ['整式乘法', '因式分解', '分式', '全等三角形']
+      G6: ['数的整除与分解素因数', '分数裂项与混合运算', '比、比例与浓度工程', '圆、扇形与组合阴影', '有理数、方程组与不等式'],
+      G7: ['整式加减与乘法公式', '因式分解与配方最值', '分式化简与增根无解', '实数、图形运动与平行线模型', '全等三角形与等腰多解']
     },
     questions: SHANGHAI_MATH_QUESTIONS
   },

@@ -52,12 +52,13 @@ function AppContent() {
   const [section, subjectId, view] = route.path;
   const subject = section === 's' ? getSubject(subjectId) : undefined;
   const track = route.query.get('t');
+  const difficulty = route.query.get('d');
 
   let page: React.ReactNode;
   if (section === 'parent') {
     page = <ParentDashboardPage selectedStudentParam={route.query.get('student')} />;
   } else if (subject && view === 'practice') {
-    page = <PracticePage subject={subject} grade={grade} track={track} />;
+    page = <PracticePage subject={subject} grade={grade} track={track} initialDifficulty={difficulty} />;
   } else if (subject?.id === 'english' && view === 'wordsmith') {
     page = <WordsmithApp grade={grade} />;
   } else if (subject?.id === 'ig-math' && view === 'mathgenius') {
@@ -67,7 +68,15 @@ function AppContent() {
   } else if (subject?.id === 'humanity' && view === 'adventure') {
     page = <HumanityApp grade={grade} />;
   } else if (subject) {
-    page = <SubjectPage key={subject.id} subject={subject} grade={grade} initialTrack={track} />;
+    page = (
+      <SubjectPage
+        key={subject.id}
+        subject={subject}
+        grade={grade}
+        initialTrack={track}
+        initialDifficulty={difficulty}
+      />
+    );
   } else {
     page = <HomePage grade={grade} />;
   }
