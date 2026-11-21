@@ -68,7 +68,9 @@ service cloud.firestore {
     //   - durationSec: int | null (null or >= 0)
     //   - summary: string (<= 300), aiFeedback: string | null (<= 3000), essayContent: string | null (<= 6000)
     //   - difficulty: string | null (<= 32)
-    //   - weakPoints: list (<= 10 strings <= 80 chars), questionItems: list (<= 25 items), wordItems: list (<= 25 items)
+    //   - weakPoints: list (<= 10 strings; bounded size + first/last string <= 80 chars)
+    //   - questionItems: list (<= 25 items; bounded size + first item schema + tail size validation)
+    //   - wordItems: list (<= 25 items; bounded size + first item schema + tail size validation)
     //   - createdAt: int (required, immutable, > 0), updatedAt: int (required, > 0)
     //
     // ===============================================================
@@ -83,13 +85,17 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function hasVerifiedTokenEmail(rawToken) {
+      let t = rawToken;
+      return 'email_verified' in t &&
+        t.email_verified == true &&
+        'email' in t &&
+        t.email is string &&
+        t.email.size() > 0;
+    }
+
     function hasVerifiedEmail() {
-      return isAuthenticated() &&
-        'email' in request.auth.token &&
-        request.auth.token.email is string &&
-        request.auth.token.email.size() > 0 &&
-        'email_verified' in request.auth.token &&
-        request.auth.token.email_verified == true;
+      return isAuthenticated() && hasVerifiedTokenEmail(request.auth.token);
     }
 
     function authEmailLower() {
@@ -100,7 +106,8 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
     }
 
-    function isValidLowerEmail(email) {
+    function isValidLowerEmail(rawEmail) {
+      let email = rawEmail;
       return email is string &&
         email.size() > 0 &&
         email.size() <= 254 &&
@@ -108,20 +115,23 @@ service cloud.firestore {
         email.matches("^[a-z0-9._%+-]+@(?:[a-z0-9-]+\\.)+[a-z][a-z0-9-]{1,}$");
     }
 
-    function isValidEncodedEmail(encoded) {
+    function isValidEncodedEmail(rawEncoded) {
+      let encoded = rawEncoded;
       return encoded is string &&
         encoded.size() >= 3 &&
         encoded.size() <= 320 &&
         !encoded.matches(".*[/\\\\\\s].*");
     }
 
-    function isValidHttpsUrl(url, maxLen) {
+    function isValidHttpsUrl(rawUrl, maxLen) {
+      let url = rawUrl;
       return url is string &&
         url.size() <= maxLen &&
         url.matches("^https://[A-Za-z0-9.-]+\\.[A-Za-z][A-Za-z0-9-]{1,}(?::[0-9]{1,5})?(?:/[^\\s<>\"']*)?$");
     }
 
-    function isValidDiscordWebhookUrl(url) {
+    function isValidDiscordWebhookUrl(rawUrl) {
+      let url = rawUrl;
       return url is string &&
         url.size() <= 300 &&
         (
@@ -137,54 +147,36 @@ service cloud.firestore {
         isValidHttpsUrl(data[field], maxLen);
     }
 
-    function isValidNullableUrlField(val, maxLen) {
+    function isValidNullableUrlField(rawVal, maxLen) {
+      let val = rawVal;
       return val == null ||
         val == "" ||
         isValidHttpsUrl(val, maxLen);
     }
 
-    function isValidDateYmd(val) {
+    function isValidDateYmd(rawVal) {
+      let val = rawVal;
       return val is string &&
-        val.size() == 10 &&
         val.matches("^\\d{4}-\\d{2}-\\d{2}$");
     }
 
-    function isValidAvatar(val) {
-      return val is string &&
-        val.size() <= 32 &&
-        val in ['google', 'owl', 'rocket', 'bot', 'cat', 'star'];
+    function isValidStringListMax10(rawArr, maxItemLen) {
+      let a = rawArr;
+      return a is list && isValidStringListMax10Bounds(a, a.size(), maxItemLen);
     }
 
-    function isValidGrade(val) {
-      return val is string &&
-        val in ['G6', 'G7'];
-    }
-
-    function isValidSubjectId(val) {
-      return val is string &&
-        val in ['english', 'ig-math', 'shanghai-math', 'humanity', 'science'];
-    }
-
-    function isValidStringListMax10(arr, maxItemLen) {
-      return arr is list &&
-        arr.size() <= 10 &&
-        (arr.size() < 1 || (arr[0] is string && arr[0].size() <= maxItemLen)) &&
-        (arr.size() < 2 || (arr[1] is string && arr[1].size() <= maxItemLen)) &&
-        (arr.size() < 3 || (arr[2] is string && arr[2].size() <= maxItemLen)) &&
-        (arr.size() < 4 || (arr[3] is string && arr[3].size() <= maxItemLen)) &&
-        (arr.size() < 5 || (arr[4] is string && arr[4].size() <= maxItemLen)) &&
-        (arr.size() < 6 || (arr[5] is string && arr[5].size() <= maxItemLen)) &&
-        (arr.size() < 7 || (arr[6] is string && arr[6].size() <= maxItemLen)) &&
-        (arr.size() < 8 || (arr[7] is string && arr[7].size() <= maxItemLen)) &&
-        (arr.size() < 9 || (arr[8] is string && arr[8].size() <= maxItemLen)) &&
-        (arr.size() < 10 || (arr[9] is string && arr[9].size() <= maxItemLen));
+    function isValidStringListMax10Bounds(a, n, m) {
+      return n <= 10 &&
+        (n == 0 || (a[0] is string && a[0].size() <= m)) &&
+        (n < 2 || (a[n - 1] is string && a[n - 1].size() <= m));
     }
 
     // ===============================================================
     // Guardian Link Validators
     // ===============================================================
 
-    function isValidGuardianLink(data) {
+    function isValidGuardianLink(rawData) {
+      let data = rawData;
       return data.keys().hasOnly([
           'parentUid', 'parentEmail', 'parentName', 'studentEmail', 'discordWebhookUrl',
           'createdAt', 'updatedAt', 'studentUid', 'studentName', 'studentAvatarId', 'studentPhotoURL'
@@ -230,12 +222,13 @@ service cloud.firestore {
     }
 
     function isGuardianLinkMatch(linkDoc, studentUid, studentEmail) {
-      return 'parentUid' in linkDoc.data &&
-        linkDoc.data.parentUid == request.auth.uid &&
-        'studentEmail' in linkDoc.data &&
-        linkDoc.data.studentEmail == studentEmail &&
-        'studentUid' in linkDoc.data &&
-        linkDoc.data.studentUid == studentUid;
+      let d = linkDoc.data;
+      return 'parentUid' in d &&
+        d.parentUid == request.auth.uid &&
+        'studentEmail' in d &&
+        d.studentEmail == studentEmail &&
+        'studentUid' in d &&
+        d.studentUid == studentUid;
     }
 
     function hasActiveGuardianLink(studentUid, studentEmail, studentEmailEncoded) {
@@ -251,9 +244,10 @@ service cloud.firestore {
     }
 
     function hasActiveGuardianLinkForProgressDoc(progDoc, studentUid) {
-      return 'studentEmailEncoded' in progDoc.data &&
-        'studentEmail' in progDoc.data &&
-        hasActiveGuardianLink(studentUid, progDoc.data.studentEmail, progDoc.data.studentEmailEncoded);
+      let d = progDoc.data;
+      return 'studentEmailEncoded' in d &&
+        'studentEmail' in d &&
+        hasActiveGuardianLink(studentUid, d.studentEmail, d.studentEmailEncoded);
     }
 
     function hasActiveGuardianLinkViaProgress(studentUid) {
@@ -269,247 +263,250 @@ service cloud.firestore {
     // Student Progress Summary Validators
     // ===============================================================
 
-    function isValidDailyTasks(tasks) {
-      return tasks is map &&
-        tasks.keys().hasOnly(['practice', 'wordsmith', 'challenge']) &&
-        tasks.keys().hasAll(['practice', 'wordsmith', 'challenge']) &&
-        tasks.practice is bool &&
-        tasks.wordsmith is bool &&
-        tasks.challenge is bool;
-    }
-
-    function isValidRewardsSummary(rs) {
+    function isValidRewardsSummary(rawRs) {
+      let rs = rawRs;
       return rs is map &&
-        rs.keys().hasOnly([
-          'coins', 'xp', 'activeTitleId', 'streakCurrent', 'streakLongest',
-          'lastCompletedDate', 'dailyDate', 'dailyTasks', 'dailyGoalAwarded', 'pendingRedemptionsCount'
-        ]) &&
-        rs.keys().hasAll([
-          'coins', 'xp', 'activeTitleId', 'streakCurrent', 'streakLongest',
-          'lastCompletedDate', 'dailyDate', 'dailyTasks', 'dailyGoalAwarded', 'pendingRedemptionsCount'
-        ]) &&
+        rs.size() == 10 &&
         rs.coins is int && rs.coins >= 0 &&
         rs.xp is int && rs.xp >= 0 &&
-        rs.activeTitleId is string && rs.activeTitleId.size() > 0 && rs.activeTitleId.size() <= 32 &&
-        rs.streakCurrent is int && rs.streakCurrent >= 0 &&
-        rs.streakLongest is int && rs.streakLongest >= 0 &&
+        rs.activeTitleId is string && rs.activeTitleId.size() <= 32 &&
+        rs.streakCurrent is int &&
+        rs.streakLongest is int &&
         (rs.lastCompletedDate == null || isValidDateYmd(rs.lastCompletedDate)) &&
         isValidDateYmd(rs.dailyDate) &&
-        isValidDailyTasks(rs.dailyTasks) &&
+        rs.dailyTasks is map &&
+        rs.dailyTasks.size() == 3 &&
+        rs.dailyTasks.practice is bool &&
+        rs.dailyTasks.wordsmith is bool &&
+        rs.dailyTasks.challenge is bool &&
         rs.dailyGoalAwarded is bool &&
         rs.pendingRedemptionsCount is int && rs.pendingRedemptionsCount >= 0 && rs.pendingRedemptionsCount <= 1000;
     }
 
-    function isValidSubjectStatEntry(entry) {
-      return entry is map &&
-        entry.keys().hasOnly(['completedCount', 'totalAccuracySum', 'avgAccuracyPct', 'lastPracticedAt', 'lastTitle']) &&
-        entry.keys().hasAll(['completedCount', 'totalAccuracySum', 'avgAccuracyPct', 'lastPracticedAt', 'lastTitle']) &&
-        entry.completedCount is int && entry.completedCount >= 0 &&
-        entry.totalAccuracySum is int && entry.totalAccuracySum >= 0 &&
-        entry.avgAccuracyPct is int && entry.avgAccuracyPct >= 0 && entry.avgAccuracyPct <= 100 &&
-        entry.lastPracticedAt is int && entry.lastPracticedAt >= 0 &&
-        entry.lastTitle is string && entry.lastTitle.size() <= 160;
+    function isValidSubjectStatEntry(rawEntry) {
+      let e = rawEntry;
+      return e is map &&
+        e.size() == 5 &&
+        e.completedCount is int &&
+        e.totalAccuracySum is int &&
+        e.avgAccuracyPct is int &&
+        e.lastPracticedAt is int &&
+        e.lastTitle is string && e.lastTitle.size() <= 160;
     }
 
-    function isValidSubjectStatsMap(stats) {
-      return stats is map &&
-        stats.keys().hasOnly(['english', 'ig-math', 'shanghai-math', 'humanity', 'science']) &&
-        (!('english' in stats) || isValidSubjectStatEntry(stats['english'])) &&
-        (!('ig-math' in stats) || isValidSubjectStatEntry(stats['ig-math'])) &&
-        (!('shanghai-math' in stats) || isValidSubjectStatEntry(stats['shanghai-math'])) &&
-        (!('humanity' in stats) || isValidSubjectStatEntry(stats['humanity'])) &&
-        (!('science' in stats) || isValidSubjectStatEntry(stats['science']));
+    function isValidSubjectStatsMap(rawStats) {
+      let s = rawStats;
+      return s is map &&
+        s.keys().hasOnly(['english', 'ig-math', 'shanghai-math', 'humanity', 'science']) &&
+        (!('english' in s) || isValidSubjectStatEntry(s['english'])) &&
+        (!('ig-math' in s) || isValidSubjectStatEntry(s['ig-math'])) &&
+        (!('shanghai-math' in s) || isValidSubjectStatEntry(s['shanghai-math'])) &&
+        (!('humanity' in s) || isValidSubjectStatEntry(s['humanity'])) &&
+        (!('science' in s) || isValidSubjectStatEntry(s['science']));
     }
 
-    function isValidMathGeniusProfile(mg) {
+    function isValidMathGeniusProfile(rawMg) {
+      let mg = rawMg;
       return mg == null || (
         mg is map &&
-        mg.keys().hasOnly(['currentDifficulty', 'totalQuizzesTaken', 'weakCategories']) &&
-        mg.keys().hasAll(['currentDifficulty', 'totalQuizzesTaken', 'weakCategories']) &&
-        mg.currentDifficulty is string && mg.currentDifficulty.size() > 0 && mg.currentDifficulty.size() <= 32 &&
-        mg.totalQuizzesTaken is int && mg.totalQuizzesTaken >= 0 &&
+        mg.size() == 3 &&
+        mg.currentDifficulty is string && mg.currentDifficulty.size() <= 32 &&
+        mg.totalQuizzesTaken is int &&
         isValidStringListMax10(mg.weakCategories, 64)
       );
     }
 
-    function isValidWordsmithStats(ws) {
+    function isValidWordsmithStats(rawWs) {
+      let ws = rawWs;
       return ws == null || (
         ws is map &&
-        ws.keys().hasOnly(['totalSessions', 'totalWords', 'avgScore']) &&
-        ws.keys().hasAll(['totalSessions', 'totalWords', 'avgScore']) &&
-        ws.totalSessions is int && ws.totalSessions >= 0 &&
-        ws.totalWords is int && ws.totalWords >= 0 &&
+        ws.size() == 3 &&
+        ws.totalSessions is int &&
+        ws.totalWords is int &&
         ws.avgScore is number && ws.avgScore >= 0 && ws.avgScore <= 5
       );
     }
 
-    function isValidHumanityProgress(hp) {
+    function isValidHumanityProgress(rawHp) {
+      let hp = rawHp;
       return hp == null || (
         hp is map &&
-        hp.keys().hasOnly(['s1', 's2', 's3']) &&
-        hp.keys().hasAll(['s1', 's2', 's3']) &&
+        hp.size() == 3 &&
         hp.s1 is int && hp.s1 >= 1 && hp.s1 <= 10 &&
         hp.s2 is int && hp.s2 >= 1 && hp.s2 <= 10 &&
         hp.s3 is int && hp.s3 >= 1 && hp.s3 <= 10
       );
     }
 
-    function isValidStudentProgress(studentUid, data) {
-      return data.keys().hasOnly([
-          'studentUid', 'studentEmail', 'studentEmailEncoded', 'displayName',
-          'avatarId', 'photoURL', 'grade', 'updatedAt', 'lastActivityAt',
-          'rewardsSummary', 'subjectStats', 'mathGeniusProfile', 'wordsmithStats', 'humanityProgress'
-        ]) &&
-        data.keys().hasAll([
-          'studentUid', 'studentEmail', 'studentEmailEncoded', 'displayName',
-          'avatarId', 'photoURL', 'grade', 'updatedAt', 'lastActivityAt',
-          'rewardsSummary', 'subjectStats', 'mathGeniusProfile', 'wordsmithStats', 'humanityProgress'
-        ]) &&
-        data.studentUid is string && data.studentUid == studentUid &&
-        data.studentUid.size() > 0 && data.studentUid.size() <= 128 &&
-        isValidLowerEmail(data.studentEmail) &&
-        isValidEncodedEmail(data.studentEmailEncoded) &&
-        data.displayName is string && data.displayName.size() <= 64 &&
-        isValidAvatar(data.avatarId) &&
-        isValidNullableUrlField(data.photoURL, 512) &&
-        isValidGrade(data.grade) &&
-        data.updatedAt is int && data.updatedAt > 0 &&
-        (data.lastActivityAt == null || (data.lastActivityAt is int && data.lastActivityAt > 0)) &&
-        isValidRewardsSummary(data.rewardsSummary) &&
-        isValidSubjectStatsMap(data.subjectStats) &&
-        isValidMathGeniusProfile(data.mathGeniusProfile) &&
-        isValidWordsmithStats(data.wordsmithStats) &&
-        isValidHumanityProgress(data.humanityProgress);
+    function isValidStudentProgress(studentUid, rawData) {
+      let d = rawData;
+      return d is map &&
+        d.size() == 14 &&
+        d.studentUid == studentUid &&
+        studentUid.size() > 0 && studentUid.size() <= 128 &&
+        d.studentEmail == authEmailLower() &&
+        d.studentEmail.size() <= 254 &&
+        isValidEncodedEmail(d.studentEmailEncoded) &&
+        d.displayName is string && d.displayName.size() <= 64 &&
+        d.avatarId in ['google', 'owl', 'rocket', 'bot', 'cat', 'star'] &&
+        isValidNullableUrlField(d.photoURL, 512) &&
+        d.grade in ['G6', 'G7'] &&
+        d.updatedAt is int && d.updatedAt > 0 &&
+        (d.lastActivityAt == null || (d.lastActivityAt is int && d.lastActivityAt > 0)) &&
+        isValidRewardsSummary(d.rewardsSummary) &&
+        isValidSubjectStatsMap(d.subjectStats) &&
+        isValidMathGeniusProfile(d.mathGeniusProfile) &&
+        isValidWordsmithStats(d.wordsmithStats) &&
+        isValidHumanityProgress(d.humanityProgress);
+    }
+
+    function isValidStudentProgressCreate(studentUid) {
+      return isValidStudentProgress(studentUid, request.resource.data);
+    }
+
+    function isValidStudentProgressUpdate(studentUid) {
+      let d = request.resource.data;
+      let r = resource.data;
+      return isValidStudentProgress(studentUid, d) &&
+        d.studentUid == r.studentUid &&
+        d.studentEmail == r.studentEmail;
     }
 
     // ===============================================================
     // Student Activity Validators
     // ===============================================================
 
-    function isValidQuestionReviewItem(item) {
+    function isValidOptNonNegInt(rawVal) {
+      let v = rawVal;
+      return v == null || (v is int && v >= 0);
+    }
+
+    function isValidOptBool(rawVal) {
+      let v = rawVal;
+      return v == null || v is bool;
+    }
+
+    function isValidOptStrMax(rawVal, maxLen) {
+      let v = rawVal;
+      return v == null || (v is string && v.size() <= maxLen);
+    }
+
+    function isValidReviewItemTail(rawItem) {
+      let item = rawItem;
+      return item is map && item.size() >= 4 && item.size() <= 7;
+    }
+
+    function isValidQuestionReviewItem(rawItem) {
+      let item = rawItem;
       return item is map &&
         item.keys().hasOnly(['question', 'userAnswer', 'correctAnswer', 'isCorrect', 'attempts', 'usedHint', 'category']) &&
-        item.keys().hasAll(['question', 'userAnswer', 'correctAnswer', 'isCorrect']) &&
         item.question is string && item.question.size() > 0 && item.question.size() <= 600 &&
         item.userAnswer is string && item.userAnswer.size() <= 300 &&
         item.correctAnswer is string && item.correctAnswer.size() <= 300 &&
         item.isCorrect is bool &&
-        (!('attempts' in item) || item.attempts == null || (item.attempts is int && item.attempts >= 0)) &&
-        (!('usedHint' in item) || item.usedHint == null || item.usedHint is bool) &&
-        (!('category' in item) || item.category == null || (item.category is string && item.category.size() <= 80));
+        isValidOptNonNegInt(item.get('attempts', null)) &&
+        isValidOptBool(item.get('usedHint', null)) &&
+        isValidOptStrMax(item.get('category', null), 80);
     }
 
-    function isValidWordsmithReviewItem(item) {
+    function isValidWordsmithReviewItem(rawItem) {
+      let item = rawItem;
       return item is map &&
         item.keys().hasOnly(['word', 'partOfSpeech', 'userSentence', 'score', 'feedback', 'correction', 'isFallback']) &&
-        item.keys().hasAll(['word', 'userSentence', 'score', 'feedback']) &&
         item.word is string && item.word.size() > 0 && item.word.size() <= 60 &&
         item.userSentence is string && item.userSentence.size() <= 500 &&
         item.score is number && item.score >= 0 && item.score <= 5 &&
         item.feedback is string && item.feedback.size() <= 800 &&
-        (!('partOfSpeech' in item) || item.partOfSpeech == null || (item.partOfSpeech is string && item.partOfSpeech.size() <= 32)) &&
-        (!('correction' in item) || item.correction == null || (item.correction is string && item.correction.size() <= 500)) &&
-        (!('isFallback' in item) || item.isFallback == null || item.isFallback is bool);
+        isValidOptStrMax(item.get('partOfSpeech', null), 32) &&
+        isValidOptStrMax(item.get('correction', null), 500) &&
+        isValidOptBool(item.get('isFallback', null));
     }
 
-    function isValidQuestionItems(items) {
-      return items is list &&
-        items.size() <= 25 &&
-        (items.size() < 1 || isValidQuestionReviewItem(items[0])) &&
-        (items.size() < 2 || isValidQuestionReviewItem(items[1])) &&
-        (items.size() < 3 || isValidQuestionReviewItem(items[2])) &&
-        (items.size() < 4 || isValidQuestionReviewItem(items[3])) &&
-        (items.size() < 5 || isValidQuestionReviewItem(items[4])) &&
-        (items.size() < 6 || isValidQuestionReviewItem(items[5])) &&
-        (items.size() < 7 || isValidQuestionReviewItem(items[6])) &&
-        (items.size() < 8 || isValidQuestionReviewItem(items[7])) &&
-        (items.size() < 9 || isValidQuestionReviewItem(items[8])) &&
-        (items.size() < 10 || isValidQuestionReviewItem(items[9])) &&
-        (items.size() < 11 || isValidQuestionReviewItem(items[10])) &&
-        (items.size() < 12 || isValidQuestionReviewItem(items[11])) &&
-        (items.size() < 13 || isValidQuestionReviewItem(items[12])) &&
-        (items.size() < 14 || isValidQuestionReviewItem(items[13])) &&
-        (items.size() < 15 || isValidQuestionReviewItem(items[14])) &&
-        (items.size() < 16 || isValidQuestionReviewItem(items[15])) &&
-        (items.size() < 17 || isValidQuestionReviewItem(items[16])) &&
-        (items.size() < 18 || isValidQuestionReviewItem(items[17])) &&
-        (items.size() < 19 || isValidQuestionReviewItem(items[18])) &&
-        (items.size() < 20 || isValidQuestionReviewItem(items[19])) &&
-        (items.size() < 21 || isValidQuestionReviewItem(items[20])) &&
-        (items.size() < 22 || isValidQuestionReviewItem(items[21])) &&
-        (items.size() < 23 || isValidQuestionReviewItem(items[22])) &&
-        (items.size() < 24 || isValidQuestionReviewItem(items[23])) &&
-        (items.size() < 25 || isValidQuestionReviewItem(items[24]));
+    function isValidQuestionItems(rawItems) {
+      let items = rawItems;
+      return items is list && isValidQuestionItemsBounded(items, items.size());
     }
 
-    function isValidWordItems(items) {
-      return items is list &&
-        items.size() <= 25 &&
-        (items.size() < 1 || isValidWordsmithReviewItem(items[0])) &&
-        (items.size() < 2 || isValidWordsmithReviewItem(items[1])) &&
-        (items.size() < 3 || isValidWordsmithReviewItem(items[2])) &&
-        (items.size() < 4 || isValidWordsmithReviewItem(items[3])) &&
-        (items.size() < 5 || isValidWordsmithReviewItem(items[4])) &&
-        (items.size() < 6 || isValidWordsmithReviewItem(items[5])) &&
-        (items.size() < 7 || isValidWordsmithReviewItem(items[6])) &&
-        (items.size() < 8 || isValidWordsmithReviewItem(items[7])) &&
-        (items.size() < 9 || isValidWordsmithReviewItem(items[8])) &&
-        (items.size() < 10 || isValidWordsmithReviewItem(items[9])) &&
-        (items.size() < 11 || isValidWordsmithReviewItem(items[10])) &&
-        (items.size() < 12 || isValidWordsmithReviewItem(items[11])) &&
-        (items.size() < 13 || isValidWordsmithReviewItem(items[12])) &&
-        (items.size() < 14 || isValidWordsmithReviewItem(items[13])) &&
-        (items.size() < 15 || isValidWordsmithReviewItem(items[14])) &&
-        (items.size() < 16 || isValidWordsmithReviewItem(items[15])) &&
-        (items.size() < 17 || isValidWordsmithReviewItem(items[16])) &&
-        (items.size() < 18 || isValidWordsmithReviewItem(items[17])) &&
-        (items.size() < 19 || isValidWordsmithReviewItem(items[18])) &&
-        (items.size() < 20 || isValidWordsmithReviewItem(items[19])) &&
-        (items.size() < 21 || isValidWordsmithReviewItem(items[20])) &&
-        (items.size() < 22 || isValidWordsmithReviewItem(items[21])) &&
-        (items.size() < 23 || isValidWordsmithReviewItem(items[22])) &&
-        (items.size() < 24 || isValidWordsmithReviewItem(items[23])) &&
-        (items.size() < 25 || isValidWordsmithReviewItem(items[24]));
+    function isValidQuestionItemsBounded(items, n) {
+      return n <= 25 &&
+        (n == 0 || isValidQuestionReviewItem(items[0])) &&
+        (n < 2 || isValidReviewItemTail(items[n - 1]));
     }
 
-    function isValidStudentActivity(studentUid, activityId, data) {
-      return data.keys().hasOnly([
+    function isValidWordItems(rawItems) {
+      let items = rawItems;
+      return items is list && isValidWordItemsBounded(items, items.size());
+    }
+
+    function isValidWordItemsBounded(items, n) {
+      return n <= 25 &&
+        (n == 0 || isValidWordsmithReviewItem(items[0])) &&
+        (n < 2 || isValidReviewItemTail(items[n - 1]));
+    }
+
+    function isValidStudentActivity(studentUid, activityId, rawData) {
+      let d = rawData;
+      let k = d.keys();
+      return k.hasOnly([
           'id', 'studentUid', 'studentEmail', 'studentEmailEncoded',
           'type', 'subjectId', 'title', 'grade',
           'score', 'maxScore', 'accuracyPct', 'durationSec',
           'summary', 'aiFeedback', 'essayContent', 'difficulty',
           'weakPoints', 'questionItems', 'wordItems', 'createdAt', 'updatedAt'
         ]) &&
-        data.keys().hasAll([
-          'id', 'studentUid', 'studentEmail', 'studentEmailEncoded',
-          'type', 'subjectId', 'title', 'grade',
-          'score', 'maxScore', 'accuracyPct', 'durationSec',
-          'summary', 'aiFeedback', 'essayContent', 'difficulty',
-          'weakPoints', 'questionItems', 'wordItems', 'createdAt', 'updatedAt'
-        ]) &&
-        data.id is string && data.id == activityId &&
-        data.id.size() > 0 && data.id.size() <= 128 &&
-        data.studentUid is string && data.studentUid == studentUid &&
-        data.studentUid.size() > 0 && data.studentUid.size() <= 128 &&
-        isValidLowerEmail(data.studentEmail) &&
-        isValidEncodedEmail(data.studentEmailEncoded) &&
-        data.type is string && data.type in ['practice', 'wordsmith', 'mathgenius', 'essay', 'humanity'] &&
-        isValidSubjectId(data.subjectId) &&
-        data.title is string && data.title.size() > 0 && data.title.size() <= 160 &&
-        isValidGrade(data.grade) &&
-        data.score is int && data.score >= 0 &&
-        data.maxScore is int && data.maxScore >= 0 &&
-        data.accuracyPct is int && data.accuracyPct >= 0 && data.accuracyPct <= 100 &&
-        (data.durationSec == null || (data.durationSec is int && data.durationSec >= 0)) &&
-        data.summary is string && data.summary.size() <= 300 &&
-        (data.aiFeedback == null || (data.aiFeedback is string && data.aiFeedback.size() <= 3000)) &&
-        (data.essayContent == null || (data.essayContent is string && data.essayContent.size() <= 6000)) &&
-        (data.difficulty == null || (data.difficulty is string && data.difficulty.size() <= 32)) &&
-        isValidStringListMax10(data.weakPoints, 80) &&
-        isValidQuestionItems(data.questionItems) &&
-        isValidWordItems(data.wordItems) &&
-        data.createdAt is int && data.createdAt > 0 &&
-        data.updatedAt is int && data.updatedAt > 0;
+        k.size() == 21 &&
+        isValidStudentActivityFields(studentUid, activityId, d);
+    }
+
+    function isValidStudentActivityFields(studentUid, activityId, rawData) {
+      let d = rawData;
+      let t = d.title;
+      let acc = d.accuracyPct;
+      let dur = d.durationSec;
+      let sum = d.summary;
+      let fb = d.aiFeedback;
+      let ec = d.essayContent;
+      let diff = d.difficulty;
+      return d.id == activityId &&
+        activityId.size() > 0 && activityId.size() <= 128 &&
+        d.studentUid == studentUid &&
+        studentUid.size() > 0 && studentUid.size() <= 128 &&
+        isValidLowerEmail(d.studentEmail) &&
+        isValidEncodedEmail(d.studentEmailEncoded) &&
+        d.type in ['practice', 'wordsmith', 'mathgenius', 'essay', 'humanity'] &&
+        d.subjectId in ['english', 'ig-math', 'shanghai-math', 'humanity', 'science'] &&
+        t is string && t.size() > 0 && t.size() <= 160 &&
+        d.grade in ['G6', 'G7'] &&
+        d.score is int && d.score >= 0 &&
+        d.maxScore is int && d.maxScore >= 0 &&
+        acc is int && acc >= 0 && acc <= 100 &&
+        (dur == null || (dur is int && dur >= 0)) &&
+        sum is string && sum.size() <= 300 &&
+        (fb == null || (fb is string && fb.size() <= 3000)) &&
+        (ec == null || (ec is string && ec.size() <= 6000)) &&
+        (diff == null || (diff is string && diff.size() <= 32)) &&
+        isValidStringListMax10(d.weakPoints, 80) &&
+        isValidQuestionItems(d.questionItems) &&
+        isValidWordItems(d.wordItems) &&
+        d.createdAt is int && d.createdAt > 0 &&
+        d.updatedAt is int && d.updatedAt > 0;
+    }
+
+    function isValidStudentActivityCreate(studentUid, activityId) {
+      let d = request.resource.data;
+      return isValidStudentActivity(studentUid, activityId, d) &&
+        d.studentEmail == authEmailLower();
+    }
+
+    function isValidStudentActivityUpdate(studentUid, activityId) {
+      let d = request.resource.data;
+      let r = resource.data;
+      return isValidStudentActivity(studentUid, activityId, d) &&
+        d.studentEmail == authEmailLower() &&
+        d.id == r.id &&
+        d.studentUid == r.studentUid &&
+        d.studentEmail == r.studentEmail &&
+        d.createdAt == r.createdAt;
     }
 
     // ===============================================================
@@ -560,15 +557,11 @@ service cloud.firestore {
 
       allow create: if isOwner(studentUid) &&
         hasVerifiedEmail() &&
-        studentUid.size() > 0 && studentUid.size() <= 128 &&
-        isValidStudentProgress(studentUid, request.resource.data) &&
-        request.resource.data.studentEmail == authEmailLower();
+        isValidStudentProgressCreate(studentUid);
 
       allow update: if isOwner(studentUid) &&
         hasVerifiedEmail() &&
-        isValidStudentProgress(studentUid, request.resource.data) &&
-        request.resource.data.studentEmail == authEmailLower() &&
-        areImmutableFieldsUnchanged(['studentUid', 'studentEmail']);
+        isValidStudentProgressUpdate(studentUid);
 
       allow delete: if isOwner(studentUid);
 
@@ -577,16 +570,11 @@ service cloud.firestore {
 
         allow create: if isOwner(studentUid) &&
           hasVerifiedEmail() &&
-          studentUid.size() > 0 && studentUid.size() <= 128 &&
-          activityId.size() > 0 && activityId.size() <= 128 &&
-          isValidStudentActivity(studentUid, activityId, request.resource.data) &&
-          request.resource.data.studentEmail == authEmailLower();
+          isValidStudentActivityCreate(studentUid, activityId);
 
         allow update: if isOwner(studentUid) &&
           hasVerifiedEmail() &&
-          isValidStudentActivity(studentUid, activityId, request.resource.data) &&
-          request.resource.data.studentEmail == authEmailLower() &&
-          areImmutableFieldsUnchanged(['id', 'studentUid', 'studentEmail', 'createdAt']);
+          isValidStudentActivityUpdate(studentUid, activityId);
 
         allow delete: if isOwner(studentUid);
       }

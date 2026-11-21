@@ -106,7 +106,7 @@ function buildMathProfileSummary(uid: string): StudentProgressSummary['mathGeniu
   if (!hasStats) return null;
   const totalQuizzes = Number(mathProfile.totalQuizzesTaken);
   return {
-    currentDifficulty: String(mathProfile.currentDifficulty || 'standard').slice(0, 32),
+    currentDifficulty: String(mathProfile.currentDifficulty || 'standard').trim().slice(0, 32) || 'standard',
     totalQuizzesTaken: Number.isFinite(totalQuizzes) && totalQuizzes >= 0 ? Math.floor(totalQuizzes) : 0,
     weakCategories: Array.isArray(mathProfile.weakCategories)
       ? mathProfile.weakCategories
@@ -220,6 +220,20 @@ export async function syncStudentProgressSnapshot(
         ? existingData.lastActivityAt
         : null;
 
+    // Persist an initial summary snapshot right away if the progress doc does not exist yet
+    // so guardians never see an access error if historical backfill encounters any issue.
+    if (!existingSnap.exists()) {
+      const initialPayload = buildSummaryPayload({
+        user,
+        studentEmail,
+        meta,
+        subjectStats,
+        lastActivityAt,
+        now: Date.now(),
+      });
+      await setDoc(summaryRef, initialPayload);
+    }
+
     const backfillKey = `k12_ws_backfill_v1_${user.uid}`;
     const alreadyBackfilled =
       typeof localStorage !== 'undefined' && localStorage.getItem(backfillKey) === '1';
@@ -231,23 +245,29 @@ export async function syncStudentProgressSnapshot(
         studentEmailEncoded,
         meta.profile.grade
       );
+      let backfillFailures = 0;
       if (records.length > 0) {
         const shouldRollIntoStats = Object.keys(subjectStats).length === 0;
         for (const rec of records) {
-          await setDoc(
-            doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, rec.id),
-            rec,
-            { merge: true }
-          );
-          if (shouldRollIntoStats) {
-            subjectStats = applyActivityToSubjectStats(subjectStats, rec);
-          }
-          if (!lastActivityAt || rec.createdAt > lastActivityAt) {
-            lastActivityAt = rec.createdAt;
+          try {
+            await setDoc(
+              doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, rec.id),
+              rec,
+              { merge: true }
+            );
+            if (shouldRollIntoStats) {
+              subjectStats = applyActivityToSubjectStats(subjectStats, rec);
+            }
+            if (!lastActivityAt || rec.createdAt > lastActivityAt) {
+              lastActivityAt = rec.createdAt;
+            }
+          } catch (err) {
+            backfillFailures += 1;
+            console.warn(`[syncStudentProgressSnapshot] Failed to backfill activity ${rec.id}:`, err);
           }
         }
       }
-      if (typeof localStorage !== 'undefined') {
+      if (backfillFailures === 0 && typeof localStorage !== 'undefined') {
         try {
           localStorage.setItem(backfillKey, '1');
         } catch {
@@ -300,6 +320,8 @@ export async function recordStudentActivity(
   });
   if (!record) return null;
 
+  let persistedId: string | null = null;
+
   await enqueueUidWrite(user.uid, async () => {
     const summaryRef = doc(db, STUDENT_PROGRESS_COLLECTION, user.uid);
     const existingSnap = await getDoc(summaryRef);
@@ -308,17 +330,27 @@ export async function recordStudentActivity(
       : null;
 
     const prevStats = sanitizeSubjectStats(existingData?.subjectStats);
-    const nextStats = applyActivityToSubjectStats(prevStats, record);
     const prevLast =
       typeof existingData?.lastActivityAt === 'number' && existingData.lastActivityAt > 0
         ? existingData.lastActivityAt
-        : 0;
-    const nextLastActivityAt = Math.max(prevLast, record.createdAt);
+        : null;
 
-    await setDoc(
-      doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, record.id),
-      record
-    );
+    let activitySaved = false;
+    try {
+      await setDoc(
+        doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, record.id),
+        record
+      );
+      activitySaved = true;
+      persistedId = record.id;
+    } catch (err) {
+      console.warn('[recordStudentActivity] Failed to save activity doc:', err);
+    }
+
+    const nextStats = activitySaved ? applyActivityToSubjectStats(prevStats, record) : prevStats;
+    const nextLastActivityAt = activitySaved
+      ? Math.max(prevLast ?? 0, record.createdAt)
+      : prevLast;
 
     const summaryPayload = buildSummaryPayload({
       user,
@@ -336,7 +368,7 @@ export async function recordStudentActivity(
     }).catch(() => {});
   });
 
-  return record.id;
+  return persistedId;
 }
 
 export async function updateStudentActivityFeedback(
@@ -366,6 +398,8 @@ export async function updateStudentActivityFeedback(
 export interface LinkedStudentProgressResult {
   summary: StudentProgressSummary | null;
   activities: StudentActivityRecord[];
+  syncPending?: boolean;
+  activitiesError?: boolean;
 }
 
 export async function fetchLinkedStudentProgress(
@@ -376,26 +410,39 @@ export async function fetchLinkedStudentProgress(
   }
 
   let summary: StudentProgressSummary | null = null;
-  const snap = await getDoc(doc(db, STUDENT_PROGRESS_COLLECTION, link.studentUid));
-  if (snap.exists()) {
-    summary = sanitizeStudentProgressSummary(snap.data());
+  try {
+    const snap = await getDoc(doc(db, STUDENT_PROGRESS_COLLECTION, link.studentUid));
+    if (snap.exists()) {
+      summary = sanitizeStudentProgressSummary(snap.data());
+    }
+  } catch (err) {
+    const code = (err as { code?: unknown })?.code;
+    if (code === 'permission-denied') {
+      return { summary: null, activities: [], syncPending: true };
+    }
+    throw err;
   }
 
   if (!summary) {
     return { summary: null, activities: [] };
   }
 
-  const activitiesQuery = query(
-    collection(db, STUDENT_PROGRESS_COLLECTION, summary.studentUid, ACTIVITIES_SUBCOLLECTION),
-    orderBy('createdAt', 'desc'),
-    limit(40)
-  );
-  const actSnap = await getDocs(activitiesQuery);
-  const activities: StudentActivityRecord[] = [];
-  actSnap.forEach((docSnap) => {
-    const parsed = sanitizeStudentActivityRecord(docSnap.id, docSnap.data());
-    if (parsed) activities.push(parsed);
-  });
+  try {
+    const activitiesQuery = query(
+      collection(db, STUDENT_PROGRESS_COLLECTION, summary.studentUid, ACTIVITIES_SUBCOLLECTION),
+      orderBy('createdAt', 'desc'),
+      limit(40)
+    );
+    const actSnap = await getDocs(activitiesQuery);
+    const activities: StudentActivityRecord[] = [];
+    actSnap.forEach((docSnap) => {
+      const parsed = sanitizeStudentActivityRecord(docSnap.id, docSnap.data());
+      if (parsed) activities.push(parsed);
+    });
 
-  return { summary, activities };
+    return { summary, activities };
+  } catch (err) {
+    console.warn('[fetchLinkedStudentProgress] Failed to load activities:', err);
+    return { summary, activities: [], activitiesError: true };
+  }
 }

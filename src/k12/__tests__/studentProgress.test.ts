@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createInitialRewardsState } from '../rewards';
 import {
   applyActivityToSubjectStats,
+  buildRewardsSummary,
   encodeStudentEmailKey,
   sanitizeStudentActivityRecord,
   sanitizeStudentProgressSummary,
@@ -198,5 +200,41 @@ describe('applyActivityToSubjectStats', () => {
       lastPracticedAt: 2000,
       lastTitle: 'Round 2',
     });
+  });
+});
+
+describe('buildRewardsSummary', () => {
+  it('sanitizes empty or invalid lastCompletedDate to null and falls back blank activeTitleId', () => {
+    const base = createInitialRewardsState('2026-11-20');
+    const summaryInvalid = buildRewardsSummary(
+      {
+        ...base,
+        activeTitleId: '   ',
+        streak: { ...base.streak, lastCompletedDate: 'invalid-date' },
+      },
+      '2026-11-20'
+    );
+    assert.equal(summaryInvalid.lastCompletedDate, null);
+    assert.equal(summaryInvalid.activeTitleId, 'rookie');
+
+    const summaryEmpty = buildRewardsSummary(
+      {
+        ...base,
+        streak: { ...base.streak, lastCompletedDate: '' },
+      },
+      '2026-11-20'
+    );
+    assert.equal(summaryEmpty.lastCompletedDate, null);
+
+    const summaryValid = buildRewardsSummary(
+      {
+        ...base,
+        activeTitleId: 'explorer',
+        streak: { ...base.streak, lastCompletedDate: '2026-11-20' },
+      },
+      '2026-11-20'
+    );
+    assert.equal(summaryValid.lastCompletedDate, '2026-11-20');
+    assert.equal(summaryValid.activeTitleId, 'explorer');
   });
 });

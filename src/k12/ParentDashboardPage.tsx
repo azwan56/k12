@@ -536,19 +536,45 @@ export default function ParentDashboardPage({
       )}
 
       {selectedLink && !progressLoading && !progressError && selectedLink.studentUid && !summary && (
-        <div className="chunky bg-white p-7 mt-6">
-          <div className="flex items-start gap-3">
-            <span className="text-3xl" aria-hidden="true">
-              📭
-            </span>
-            <div>
-              <h2 className="text-xl font-black">账号已关联，孩子暂未产生练习记录</h2>
-              <p className="font-bold text-slate-600 mt-1">
-                学生 {selectedLink.studentName || selectedLink.studentEmail} 已完成授权绑定。当孩子打开门户或完成任意学科练习后，学习进展与错题报告就会显示在这里。
-              </p>
+        progress?.syncPending ? (
+          <div className="chunky bg-amber-50 p-7 mt-6">
+            <div className="flex items-start gap-3">
+              <span className="text-3xl" aria-hidden="true">
+                ⏳
+              </span>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-black">账号已绑定，等待孩子页面同步学习档案</h2>
+                <p className="font-bold text-slate-700 mt-1.5 leading-relaxed">
+                  学生 {selectedLink.studentName || selectedLink.studentEmail} 已完成账号绑定，但尚未同步最新学习快照。请让孩子在设备上刷新或打开一次{' '}
+                  <span className="font-black">k12.vanpower.live</span>
+                  ，即可自动同步历史与后续练习记录。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleRefresh()}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-[3px] border-ink bg-yellow-300 hover:bg-yellow-400 text-sm font-black"
+                >
+                  <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                  刷新检查
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="chunky bg-white p-7 mt-6">
+            <div className="flex items-start gap-3">
+              <span className="text-3xl" aria-hidden="true">
+                📭
+              </span>
+              <div>
+                <h2 className="text-xl font-black">账号已关联，孩子暂未产生练习记录</h2>
+                <p className="font-bold text-slate-600 mt-1">
+                  学生 {selectedLink.studentName || selectedLink.studentEmail} 已完成授权绑定。当孩子打开门户或完成任意学科练习后，学习进展与错题报告就会显示在这里。
+                </p>
+              </div>
+            </div>
+          </div>
+        )
       )}
 
       {/* Full Student Dashboard */}
@@ -835,7 +861,12 @@ export default function ParentDashboardPage({
               })}
             </div>
 
-            {filteredActivities.length === 0 ? (
+            {progress?.activitiesError ? (
+              <div className="chunky bg-amber-50 p-5 mt-4 font-bold text-amber-900 flex items-center gap-2 text-sm">
+                <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>暂时未能加载练习明细，请点击顶部“刷新数据”重试。</span>
+              </div>
+            ) : filteredActivities.length === 0 ? (
               <div className="chunky bg-white p-6 mt-4 text-center font-bold text-slate-500">
                 该分类下暂无已同步的练习明细。
               </div>

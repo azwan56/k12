@@ -484,13 +484,20 @@ export function sanitizeStudentProgressSummary(
 
 export function buildRewardsSummary(rewards: RewardsState, today: string = getLocalDateStr()) {
   const isToday = rewards.daily.date === today;
+  const activeTitleId = (rewards.activeTitleId || 'rookie').trim().slice(0, 32) || 'rookie';
+  const lastCompletedDate =
+    typeof rewards.streak.lastCompletedDate === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rewards.streak.lastCompletedDate)
+      ? rewards.streak.lastCompletedDate
+      : null;
+
   return {
     coins: clampNonNegInt(rewards.coins, 0),
     xp: clampNonNegInt(rewards.xp, 0),
-    activeTitleId: (rewards.activeTitleId || 'rookie').slice(0, 32),
+    activeTitleId,
     streakCurrent: clampNonNegInt(rewards.streak.current, 0),
     streakLongest: clampNonNegInt(rewards.streak.longest, 0),
-    lastCompletedDate: rewards.streak.lastCompletedDate,
+    lastCompletedDate,
     dailyDate: today,
     dailyTasks: isToday
       ? {
