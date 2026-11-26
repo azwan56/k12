@@ -5,7 +5,7 @@
     "serve": "firebase emulators:start --only functions",
     "shell": "firebase functions:shell",
     "start": "npm run shell",
-    "deploy": "firebase deploy --only functions:k12:generateMathQuestions,functions:k12:getFinalFeedback,functions:k12:evaluateWordsmithSentence,functions:k12:generateWordsmithBatch --project vanpower-f15f9",
+    "deploy": "firebase deploy --only functions:k12:generateMathQuestions,functions:k12:getFinalFeedback,functions:k12:evaluateWordsmithSentence,functions:k12:generateWordsmithBatch,functions:k12:generatePracticeQuestions --project vanpower-f15f9",
     "logs": "firebase functions:log"
   },
   "engines": {

@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { ESSAY_PROMPTS, GradeLevel, gradeLabel } from '../data/k12Subjects';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { useRewards } from '../hooks/useRewards';
+import ActivitySyncStatus, { type ActivitySyncState } from './ActivitySyncStatus';
+import { buildDeterministicActivityId } from './pendingActivityQueue';
 import ReportActions from './ReportActions';
-import type { ActivityRewardOutcome } from './rewards';
+import type { ActivityRewardOutcome, RewardsState } from './rewards';
 import RewardBanner from './RewardBanner';
+import type { RecordActivityInput } from './studentProgress';
 import { recordStudentActivity } from './studentProgressService';
 import { BackLink } from './SubjectPage';
 
@@ -19,8 +22,11 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
   const [done, setDone] = useState(false);
   const [submissionCount, setSubmissionCount] = useState(0);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const [syncStatus, setSyncStatus] = useState<ActivitySyncState>('idle');
+  const pendingInputRef = useRef<RecordActivityInput | null>(null);
+  const rewardsStateRef = useRef<RewardsState | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
-  const { user } = useAuth();
+  const { user, needsSSOSync, signInWithGoogle } = useAuth();
   const { profile, resolvedName, effectiveAvatarId } = useProfile();
   const { rewards, recordEssay } = useRewards();
 
@@ -32,11 +38,43 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
     setDraft(localStorage.getItem(`k12_essay_${prompt.id}`) ?? '');
     setDone(false);
     setRewardOutcome(null);
+    setSyncStatus('idle');
+    pendingInputRef.current = null;
+    rewardsStateRef.current = null;
   }, [prompt.id]);
+
+  const syncEssayActivity = useCallback(
+    async (input: RecordActivityInput, rewardsState: RewardsState) => {
+      if (!user) {
+        await recordStudentActivity(
+          null,
+          { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+          input
+        );
+        setSyncStatus('guest');
+        return;
+      }
+      setSyncStatus('syncing');
+      const id = await recordStudentActivity(
+        user,
+        { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+        input
+      );
+      setSyncStatus(id ? 'synced' : 'error');
+    },
+    [user, profile, resolvedName, effectiveAvatarId]
+  );
+
+  useEffect(() => {
+    if (done && user && syncStatus === 'guest' && pendingInputRef.current) {
+      void syncEssayActivity(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+    }
+  }, [done, user, syncStatus, syncEssayActivity, rewards]);
 
   const update = (value: string) => {
     setDraft(value);
     setDone(false);
+    setSyncStatus('idle');
     localStorage.setItem(`k12_essay_${prompt.id}`, value);
   };
 
@@ -106,29 +144,25 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
             setSubmissionCount((c) => c + 1);
             const outcome = words >= min ? recordEssay(prompt.id) : null;
             if (outcome) setRewardOutcome(outcome);
-            if (user && draft.trim().length > 0) {
-              void recordStudentActivity(
-                user,
-                {
-                  profile,
-                  resolvedName,
-                  effectiveAvatarId,
-                  rewards: outcome ? outcome.nextState : rewards,
-                },
-                {
-                  type: 'essay',
-                  subjectId: 'english',
-                  title: `命题作文 · ${prompt.genre}《${prompt.title}》`,
-                  grade,
-                  score: words,
-                  maxScore: min,
-                  accuracyPct: Math.min(100, Math.round((words / min) * 100)),
-                  summary: `完成作文《${prompt.title}》，共 ${words} 词（建议 ${min}–${max} 词）`,
-                  essayContent: draft.trim().slice(0, 4000),
-                }
-              ).catch((err) => {
-                console.warn('[EssayPage] Failed to record activity:', err);
-              });
+            const nextRewards = outcome ? outcome.nextState : rewards;
+            rewardsStateRef.current = nextRewards;
+            if (draft.trim().length > 0) {
+              const createdAt = Date.now();
+              const input: RecordActivityInput = {
+                id: buildDeterministicActivityId('essay', createdAt),
+                type: 'essay',
+                subjectId: 'english',
+                title: `命题作文 · ${prompt.genre}《${prompt.title}》`,
+                grade,
+                score: words,
+                maxScore: min,
+                accuracyPct: Math.min(100, Math.round((words / min) * 100)),
+                summary: `完成作文《${prompt.title}》，共 ${words} 词（建议 ${min}–${max} 词）`,
+                essayContent: draft.trim().slice(0, 4000),
+                createdAt,
+              };
+              pendingInputRef.current = input;
+              void syncEssayActivity(input, nextRewards);
             }
           }}
           disabled={words === 0}
@@ -166,6 +200,16 @@ export default function EssayPage({ grade }: { grade: GradeLevel }) {
               </p>
             </div>
             <RewardBanner outcome={rewardOutcome} />
+            <ActivitySyncStatus
+              status={syncStatus}
+              needsSSOSync={needsSSOSync}
+              onSignIn={() => void signInWithGoogle()}
+              onRetry={() => {
+                if (pendingInputRef.current) {
+                  void syncEssayActivity(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+                }
+              }}
+            />
             <ReportActions
               reportRef={reportRef}
               subjectLabel={`命题作文 · ${prompt.genre}《${prompt.title}》`}

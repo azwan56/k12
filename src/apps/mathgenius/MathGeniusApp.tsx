@@ -3,9 +3,16 @@ import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
 import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
-import type { ActivityRewardOutcome } from '../../k12/rewards';
+import type { ActivitySyncState } from '../../k12/ActivitySyncStatus';
+import { recordLocalDailyMistake } from '../../k12/dailyMistakes';
+import { buildDeterministicActivityId } from '../../k12/pendingActivityQueue';
+import type { ActivityRewardOutcome, RewardsState } from '../../k12/rewards';
 import { getRecentMathStems } from '../../k12/questionDedupe';
-import type { QuestionReviewItem } from '../../k12/studentProgress';
+import {
+  type QuestionReviewItem,
+  type RecordActivityInput,
+  formatInProgressSummary,
+} from '../../k12/studentProgress';
 import { recordStudentActivity, updateStudentActivityFeedback } from '../../k12/studentProgressService';
 import {
   AppState,
@@ -43,9 +50,19 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
   const [streamingFeedback, setStreamingFeedback] = useState<string>('');
   const [isFeedbackLoading, setIsFeedbackLoading] = useState<boolean>(false);
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
-  const { recordMathGenius } = useRewards();
+  const [syncStatus, setSyncStatus] = useState<ActivitySyncState>('idle');
+  const { rewards, recordMathGenius } = useRewards();
   // Bumped whenever the user leaves a run, so late async results are ignored.
   const runRef = useRef(0);
+  const lastActivityInputRef = useRef<RecordActivityInput | null>(null);
+  const lastRewardsRef = useRef<RewardsState | null>(null);
+  const streamingFeedbackRef = useRef<string>('');
+  const sessionMetaRef = useRef<{ id: string; createdAt: number }>({
+    id: buildDeterministicActivityId('mathgenius', Date.now()),
+    createdAt: Date.now(),
+  });
+  const liveAnswersRef = useRef<(UserAnswer | undefined)[]>([]);
+  const [liveCount, setLiveCount] = useState(0);
 
   // Student learning profile & adaptive state
   const [profile, setProfile] = useState<StudentLearningProfile>(() => getLearningProfile(user?.uid || 'guest'));
@@ -78,10 +95,37 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
     saveLearningProfile(updated);
   };
 
+  const syncMathRound = useCallback(
+    async (input: RecordActivityInput, rewardsState: RewardsState): Promise<string | null> => {
+      if (!user) {
+        setSyncStatus('guest');
+        return null;
+      }
+      setSyncStatus('syncing');
+      const id = await recordStudentActivity(
+        user,
+        {
+          profile: portalProfile,
+          resolvedName,
+          effectiveAvatarId,
+          rewards: rewardsState,
+        },
+        input
+      );
+      setSyncStatus(id ? 'synced' : 'error');
+      return id;
+    },
+    [user, portalProfile, resolvedName, effectiveAvatarId]
+  );
+
   const startNewQuiz = async (category: string = selectedCategory) => {
     const run = ++runRef.current;
     setState(AppState.LOADING);
     setError(null);
+    setSyncStatus('idle');
+    lastActivityInputRef.current = null;
+    lastRewardsRef.current = null;
+    streamingFeedbackRef.current = '';
     try {
       // Passes active difficulty, weak-point weighting, and recent stems to prevent repeats
       const newQuestions = await generateMathQuestions(
@@ -93,12 +137,19 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         user?.uid
       );
       if (run !== runRef.current) return;
+      const now = Date.now();
+      sessionMetaRef.current = {
+        id: buildDeterministicActivityId('mathgenius', now),
+        createdAt: now,
+      };
+      liveAnswersRef.current = [];
+      setLiveCount(0);
       setQuestions(newQuestions);
       setCurrentQuestionIndex(0);
       setUserAnswers([]);
       setResults(null);
       setStreamingFeedback('');
-      setStartTime(Date.now());
+      setStartTime(now);
       setState(AppState.PRACTICE);
     } catch {
       if (run !== runRef.current) return;
@@ -142,6 +193,7 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
       });
       const outcome = recordMathGenius(score, questions.length);
       setRewardOutcome(outcome);
+      lastRewardsRef.current = outcome.nextState;
       setState(AppState.RESULTS);
 
       let activityPromise: Promise<string | null> | null = null;
@@ -164,29 +216,24 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         const categoryLabel =
           GRADE_6_CATEGORIES.find((c) => c.id === selectedCategory)?.labelZh || '综合练习';
         const diffLabel = DIFFICULTY_CONFIGS[difficulty]?.shortLabelZh || difficulty;
-        activityPromise = recordStudentActivity(
-          user,
-          {
-            profile: portalProfile,
-            resolvedName,
-            effectiveAvatarId,
-            rewards: outcome.nextState,
-          },
-          {
-            id: `mg_${Date.now()}`,
-            type: 'mathgenius',
-            subjectId: 'ig-math',
-            title: `MathGenius · ${categoryLabel}（${diffLabel}）`,
-            grade,
-            score,
-            maxScore: questions.length,
-            durationSec: Math.max(1, Math.round(timeTaken / 1000)),
-            difficulty,
-            weakPoints,
-            questionItems,
-            summary: `完成 ${questions.length} 题，答对 ${score} 题（${diffLabel}难度）`,
-          }
-        ).catch((err) => {
+        const input: RecordActivityInput = {
+          id: sessionMetaRef.current.id,
+          type: 'mathgenius',
+          subjectId: 'ig-math',
+          title: `MathGenius · ${categoryLabel}（${diffLabel}）`,
+          grade,
+          score,
+          maxScore: questions.length,
+          durationSec: Math.max(1, Math.round(timeTaken / 1000)),
+          difficulty,
+          weakPoints,
+          questionItems,
+          summary: `完成 ${questions.length} 题，答对 ${score} 题（${diffLabel}难度）`,
+          createdAt: sessionMetaRef.current.createdAt,
+          isComplete: true,
+        };
+        lastActivityInputRef.current = input;
+        activityPromise = syncMathRound(input, outcome.nextState).catch((err) => {
           console.warn('[MathGeniusApp] Failed to record activity:', err);
           return null;
         });
@@ -200,12 +247,21 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         for await (const chunk of stream) {
           if (run !== runRef.current) return;
           fullText += chunk;
+          streamingFeedbackRef.current = fullText;
           setStreamingFeedback(fullText);
         }
-        if (user && fullText.trim() && activityPromise) {
-          const actId = await activityPromise;
-          if (actId) {
-            void updateStudentActivityFeedback(user, actId, fullText).catch(() => {});
+        if (user && fullText.trim()) {
+          if (lastActivityInputRef.current) {
+            lastActivityInputRef.current = {
+              ...lastActivityInputRef.current,
+              aiFeedback: fullText.trim().slice(0, 3000),
+            };
+          }
+          if (activityPromise) {
+            const actId = await activityPromise;
+            if (actId) {
+              void updateStudentActivityFeedback(user, actId, fullText).catch(() => {});
+            }
           }
         }
       } catch {
@@ -227,11 +283,108 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
       difficulty,
       profile,
       user,
+      recordMathGenius,
+      grade,
+      syncMathRound,
+    ]
+  );
+
+  const handleQuestionProgress = useCallback(
+    (result: AnswerResultPayload) => {
+      const question = questions[currentQuestionIndex];
+      if (!question || questions.length === 0) return;
+
+      const entry: UserAnswer = {
+        questionId: question.id,
+        answer: result.answer,
+        isCorrect: result.isCorrect,
+        attempts: result.attempts,
+        firstAttemptAnswer: result.firstAttemptAnswer,
+        secondAttemptAnswer: result.secondAttemptAnswer,
+        usedHint: result.usedHint,
+      };
+      liveAnswersRef.current[currentQuestionIndex] = entry;
+      const compactAnswers = liveAnswersRef.current.filter((a): a is UserAnswer => Boolean(a));
+      const questionItems: QuestionReviewItem[] = compactAnswers.map((a) => {
+        const q = questions.find((item) => item.id === a.questionId);
+        return {
+          question: q?.question || '数学题',
+          userAnswer: a.answer || '未作答',
+          correctAnswer: q?.correctAnswer || '',
+          isCorrect: a.isCorrect,
+          attempts: a.attempts,
+          usedHint: a.usedHint,
+          category: q?.category,
+        };
+      });
+
+      const categoryLabel =
+        GRADE_6_CATEGORIES.find((c) => c.id === selectedCategory)?.labelZh || '综合练习';
+      const diffLabel = DIFFICULTY_CONFIGS[difficulty]?.shortLabelZh || difficulty;
+      const title = `MathGenius · ${categoryLabel}（${diffLabel}）`;
+
+      if (!result.isCorrect) {
+        recordLocalDailyMistake(user?.uid ?? null, {
+          activityId: sessionMetaRef.current.id,
+          activityType: 'mathgenius',
+          subjectId: 'ig-math',
+          activityTitle: title,
+          grade,
+          isIncompleteSession: true,
+          category: question.category,
+          question: question.question,
+          userAnswer: result.answer || '未作答',
+          correctAnswer: question.correctAnswer,
+        });
+      }
+
+      const correctCount = compactAnswers.filter((a) => a.isCorrect).length;
+      const answeredCount = compactAnswers.length;
+      setLiveCount(answeredCount);
+
+      void recordStudentActivity(
+        user,
+        {
+          profile: portalProfile,
+          resolvedName,
+          effectiveAvatarId,
+          rewards,
+        },
+        {
+          id: sessionMetaRef.current.id,
+          type: 'mathgenius',
+          subjectId: 'ig-math',
+          title,
+          grade,
+          score: correctCount,
+          maxScore: questions.length,
+          accuracyPct: answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0,
+          durationSec: Math.max(1, Math.round((Date.now() - startTime) / 1000)),
+          difficulty,
+          weakPoints: [],
+          questionItems,
+          summary: formatInProgressSummary({
+            answered: answeredCount,
+            total: questions.length,
+            correct: correctCount,
+          }),
+          createdAt: sessionMetaRef.current.createdAt,
+          isComplete: false,
+        }
+      );
+    },
+    [
+      questions,
+      currentQuestionIndex,
+      selectedCategory,
+      difficulty,
+      user,
+      grade,
       portalProfile,
       resolvedName,
       effectiveAvatarId,
-      recordMathGenius,
-      grade,
+      rewards,
+      startTime,
     ]
   );
 
@@ -264,6 +417,12 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
     setState(AppState.WELCOME);
     setStreamingFeedback('');
     setIsFeedbackLoading(false);
+    setSyncStatus('idle');
+    setLiveCount(0);
+    liveAnswersRef.current = [];
+    lastActivityInputRef.current = null;
+    lastRewardsRef.current = null;
+    streamingFeedbackRef.current = '';
   }, []);
 
   if (loading) return <Spinner label="加载中…" />;
@@ -291,6 +450,8 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         total={questions.length}
         difficulty={difficulty}
         language={language}
+        liveStatusText={liveCount > 0 ? `☁️ 已实时记录 ${liveCount} 题` : undefined}
+        onProgress={handleQuestionProgress}
         onAnswer={handleAnswer}
         onQuit={resetQuiz}
       />
@@ -303,6 +464,12 @@ export default function MathGeniusApp({ grade }: { grade: GradeLevel }) {
         results={{ ...results, feedback: streamingFeedback }}
         questions={questions}
         rewardOutcome={rewardOutcome}
+        syncStatus={syncStatus}
+        onRetrySync={() => {
+          if (lastActivityInputRef.current) {
+            void syncMathRound(lastActivityInputRef.current, lastRewardsRef.current ?? rewards);
+          }
+        }}
         isFeedbackLoading={isFeedbackLoading}
         language={language}
         onRetry={() => startNewQuiz(selectedCategory)}

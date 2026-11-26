@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2, UserCheck, BarChart3 } from 'lucide-react';
-import { auth, db } from '../lib/firebase';
+import { X, Save, MessageSquare, Loader2, Link2, Users, Gift, Plus, Trash2, CheckCircle2, UserCheck, BarChart3, Copy, Check } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { isCnRegion, formatAccountDisplay, isSyntheticCnEmail } from '../lib/region';
+import { cnApi } from '../lib/cnApi';
 import { isValidDiscordWebhookUrl } from '../lib/security';
 import { doc as firestoreDoc, getDoc as firestoreGetDoc, setDoc as firestoreSetDoc } from 'firebase/firestore';
 import { useRewards } from '../hooks/useRewards';
@@ -14,7 +16,9 @@ import {
     normalizeEmail,
 } from '../k12/guardianLinks';
 import {
+    acceptGuardianInvite,
     addStudentLink,
+    createGuardianInvite,
     fetchParentStudentLinks,
     fetchStudentGuardianLinks,
     removeGuardianLink,
@@ -47,6 +51,14 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     const [newWishEmoji, setNewWishEmoji] = useState('🎁');
     const [newWishTitle, setNewWishTitle] = useState('');
     const [newWishCost, setNewWishCost] = useState('100');
+    const [cnChannel, setCnChannel] = useState<'wechat_tpl' | 'wecom' | 'dingtalk' | 'feishu'>('wechat_tpl');
+    const [inviteInfo, setInviteInfo] = useState<{ code: string; expiresAt: number } | null>(null);
+    const [inviteBusy, setInviteBusy] = useState(false);
+    const [copiedInvite, setCopiedInvite] = useState(false);
+    const [acceptCodeInput, setAcceptCodeInput] = useState('');
+    const [acceptBusy, setAcceptBusy] = useState(false);
+    const [acceptMsg, setAcceptMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+    const cnMode = isCnRegion();
 
     useEffect(() => {
         if (!isOpen) return;
@@ -60,45 +72,34 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     }, [isOpen, onClose, profile.displayName]);
 
     useEffect(() => {
-        if (isOpen && auth.currentUser) {
-            loadUserData();
+        if (isOpen && user?.uid) {
+            void loadUserData();
         } else if (isOpen) {
-            // If auth is not ready but modal is open, wait and see
-            const unsubscribe = auth.onAuthStateChanged((user) => {
-                if (user) {
-                    loadUserData();
-                } else {
-                    setIsLoading(false);
-                }
-            });
-            return () => unsubscribe();
+            setIsLoading(false);
         }
-    }, [isOpen, auth.currentUser?.uid]);
-
-    // Helper strictly for Firestore calls that might hang
-    const withTimeout = <T,>(promise: Promise<T>, ms: number = 5000): Promise<T> => {
-        return new Promise<T>((resolve, reject) => {
-            const timer = setTimeout(() => {
-                reject(new Error('Firestore timeout'));
-            }, ms);
-
-            promise
-                .then(result => {
-                    clearTimeout(timer);
-                    resolve(result);
-                })
-                .catch(err => {
-                    clearTimeout(timer);
-                    reject(err);
-                });
-        });
-    };
+    }, [isOpen, user?.uid]);
 
     const loadUserData = async () => {
         setIsLoading(true);
         try {
-            if (!auth.currentUser) return;
-            const userRef = firestoreDoc(db, 'users', auth.currentUser.uid);
+            if (!user?.uid) return;
+            if (cnMode) {
+                const [userState, students, guardians] = await Promise.all([
+                    cnApi.getUserState().catch(() => ({ notifySettings: {} })),
+                    fetchParentStudentLinks(user.uid).catch(() => [] as GuardianLink[]),
+                    fetchStudentGuardianLinks(user.email || '').catch(() => [] as GuardianLink[]),
+                ]);
+                const ns = (userState as { notifySettings?: { channel?: string; webhookUrl?: string } }).notifySettings;
+                if (ns?.channel === 'wecom' || ns?.channel === 'dingtalk' || ns?.channel === 'feishu' || ns?.channel === 'wechat_tpl') {
+                    setCnChannel(ns.channel);
+                }
+                setWebhookUrl(ns?.webhookUrl || '');
+                setConnectedStudents(students);
+                setLinkedGuardians(guardians);
+                return;
+            }
+
+            const userRef = firestoreDoc(db, 'users', user.uid);
 
             const userSnap = await firestoreGetDoc(userRef) as any;
 
@@ -106,10 +107,10 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                 const data = userSnap.data();
                 setWebhookUrl(data.discordWebhookUrl || '');
             } else {
-                const fallbackName = auth.currentUser.displayName || (auth.currentUser.email ? auth.currentUser.email.split('@')[0] : 'User');
+                const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
                 await firestoreSetDoc(userRef, {
-                    uid: auth.currentUser.uid,
-                    email: auth.currentUser.email,
+                    uid: user.uid,
+                    email: user.email,
                     name: fallbackName,
                     discordWebhookUrl: '',
                     createdAt: Date.now()
@@ -117,12 +118,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
             }
 
             const [students, guardians] = await Promise.all([
-                fetchParentStudentLinks(auth.currentUser.uid).catch((err) => {
+                fetchParentStudentLinks(user.uid).catch((err) => {
                     console.warn('Failed to fetch parent student links:', err);
                     return [] as GuardianLink[];
                 }),
-                auth.currentUser.email
-                    ? fetchStudentGuardianLinks(auth.currentUser.email).catch((err) => {
+                user.email
+                    ? fetchStudentGuardianLinks(user.email).catch((err) => {
                         console.warn('Failed to fetch guardian links:', err);
                         return [] as GuardianLink[];
                     })
@@ -145,8 +146,22 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
     };
 
     const handleSave = async () => {
-        if (!auth.currentUser) return;
+        if (!user?.uid) return;
         const trimmedWebhook = webhookUrl.trim();
+        if (cnMode) {
+            setIsSaving(true);
+            setSaveStatus('idle');
+            try {
+                await cnApi.updateNotifySettings(cnChannel, cnChannel === 'wechat_tpl' ? '' : trimmedWebhook);
+                setSaveStatus('success');
+                setTimeout(() => setSaveStatus('idle'), 3000);
+            } catch {
+                setSaveStatus('invalid_webhook');
+            } finally {
+                setIsSaving(false);
+            }
+            return;
+        }
         if (trimmedWebhook && !isValidDiscordWebhookUrl(trimmedWebhook)) {
             setSaveStatus('invalid_webhook');
             return;
@@ -155,18 +170,18 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
         setSaveStatus('idle');
 
         try {
-            const userRef = firestoreDoc(db, 'users', auth.currentUser.uid);
+            const userRef = firestoreDoc(db, 'users', user.uid);
             await firestoreSetDoc(
                 userRef,
                 {
-                    uid: auth.currentUser.uid,
-                    email: auth.currentUser.email ?? null,
+                    uid: user.uid,
+                    email: user.email ?? null,
                     name: resolvedName,
                     discordWebhookUrl: trimmedWebhook,
                 },
                 { merge: true }
             );
-            await syncParentLinksMetadata(auth.currentUser.uid, {
+            await syncParentLinksMetadata(user.uid, {
                 parentName: resolvedName,
                 discordWebhookUrl: trimmedWebhook,
             }).catch((err) => {
@@ -185,10 +200,10 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
 
     const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!auth.currentUser?.uid || !auth.currentUser.email) return;
+        if (!user?.uid || !user.email) return;
 
         const normalizedStudent = normalizeEmail(studentEmailInput);
-        const normalizedSelf = normalizeEmail(auth.currentUser.email);
+        const normalizedSelf = normalizeEmail(user.email);
 
         if (!isValidEmailAddress(normalizedStudent)) {
             setStudentLinkStatus('invalid_email');
@@ -213,12 +228,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
         setStudentLinkStatus('idle');
         try {
             if (trimmedWebhook) {
-                const userRef = firestoreDoc(db, 'users', auth.currentUser.uid);
+                const userRef = firestoreDoc(db, 'users', user.uid);
                 await firestoreSetDoc(
                     userRef,
                     {
-                        uid: auth.currentUser.uid,
-                        email: auth.currentUser.email ?? null,
+                        uid: user.uid,
+                        email: user.email ?? null,
                         name: resolvedName,
                         discordWebhookUrl: trimmedWebhook,
                     },
@@ -227,7 +242,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
             }
 
             const created = await addStudentLink({
-                parentUid: auth.currentUser.uid,
+                parentUid: user.uid,
                 parentEmail: normalizedSelf,
                 parentName: resolvedName,
                 studentEmail: normalizedStudent,
@@ -318,7 +333,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                     <div className="flex items-start gap-4 mb-5">
                                         <UserAvatar
                                             avatarId={effectiveAvatarId}
-                                            photoURL={user?.photoURL || auth.currentUser?.photoURL}
+                                            photoURL={user?.photoURL}
                                             displayName={resolvedName}
                                             size="lg"
                                         />
@@ -333,10 +348,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             </div>
                                             <p className={`text-sm mt-1 truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                                 当前显示：<span className={`font-semibold ${isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}`}>{resolvedName}</span>
-                                                {(user?.email || auth.currentUser?.email) ? ` · ${user?.email || auth.currentUser?.email}` : ''}
+                                                {user ? ` · ${formatAccountDisplay(user.email, user.provider)}` : ''}
                                             </p>
                                             <p className={`text-xs mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                                                头像与昵称将自动同步到顶部导航栏、家长监督绑定列表以及学习周报/Discord 战报。
+                                                {cnMode
+                                                    ? '头像与昵称将自动同步到顶部导航栏、家长督学看板与成绩单。'
+                                                    : '头像与昵称将自动同步到顶部导航栏、家长监督绑定列表以及学习周报/Discord 战报。'}
                                             </p>
                                         </div>
                                     </div>
@@ -353,7 +370,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                     value={profileNameInput}
                                                     maxLength={MAX_DISPLAY_NAME_LENGTH}
                                                     onChange={(e) => setProfileNameInput(e.target.value)}
-                                                    placeholder={`留空将使用账号名（${user?.displayName || auth.currentUser?.displayName || resolvedName}）`}
+                                                    placeholder={`留空将使用账号名（${user?.displayName || resolvedName}）`}
                                                     className={`flex-1 px-4 py-2.5 rounded-lg border focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all ${isDarkMode
                                                         ? 'bg-zinc-950 border-white/10 text-white placeholder-zinc-600'
                                                         : 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400'
@@ -381,12 +398,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                 顶部展示头像
                                             </label>
                                             <div className="flex flex-wrap items-center gap-2.5">
-                                                {(user?.photoURL || auth.currentUser?.photoURL) && (
+                                                {user?.photoURL && (
                                                     <button
                                                         type="button"
                                                         onClick={() => void updateProfile({ avatarId: 'google' })}
                                                         aria-pressed={effectiveAvatarId === 'google'}
-                                                        title="Google 账号头像"
+                                                        title={cnMode ? '微信账号头像' : 'Google 账号头像'}
                                                         className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${effectiveAvatarId === 'google'
                                                             ? isDarkMode
                                                                 ? 'border-amber-400 bg-amber-500/20 text-white'
@@ -398,11 +415,11 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                     >
                                                         <UserAvatar
                                                             avatarId="google"
-                                                            photoURL={user?.photoURL || auth.currentUser?.photoURL}
+                                                            photoURL={user?.photoURL}
                                                             displayName={resolvedName}
                                                             size="xs"
                                                         />
-                                                        <span>Google 头像</span>
+                                                        <span>{cnMode ? '微信头像' : 'Google 头像'}</span>
                                                     </button>
                                                 )}
                                                 {AVATAR_OPTIONS.map((opt) => {
@@ -458,7 +475,72 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                     </div>
                                 </div>
 
-                                {/* Integration Card: Discord Webhook */}
+                                {/* Integration Card: Notification Channel */}
+                                {cnMode ? (
+                                    <div className="p-6 rounded-xl border bg-zinc-50 border-black/10">
+                                        <div className="flex items-start gap-4 mb-5">
+                                            <div className="p-3 bg-emerald-600 rounded-lg text-white shadow-md">
+                                                <MessageSquare className="w-6 h-6" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-bold text-zinc-900">
+                                                    微信督学消息与群机器人推送
+                                                </h3>
+                                                <p className="text-sm mt-1 text-zinc-500">
+                                                    默认通过万跑科技微信服务号自动推送孩子练习成绩单；您也可额外绑定企业微信、钉钉或飞书群机器人接收通知。
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <div className="flex flex-wrap gap-2">
+                                                {([
+                                                    ['wechat_tpl', '仅微信服务号通知（推荐）'],
+                                                    ['wecom', '企业微信群机器人'],
+                                                    ['dingtalk', '钉钉群机器人'],
+                                                    ['feishu', '飞书群机器人'],
+                                                ] as const).map(([val, label]) => (
+                                                    <button
+                                                        key={val}
+                                                        type="button"
+                                                        onClick={() => setCnChannel(val)}
+                                                        className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors ${
+                                                            cnChannel === val
+                                                                ? 'bg-emerald-600 border-emerald-700 text-white'
+                                                                : 'bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100'
+                                                        }`}
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {cnChannel !== 'wechat_tpl' && (
+                                                <input
+                                                    type="text"
+                                                    value={webhookUrl}
+                                                    onChange={(e) => setWebhookUrl(e.target.value)}
+                                                    placeholder="请输入 https://qyapi.weixin.qq.com/... 或钉钉/飞书 Webhook"
+                                                    className="w-full px-4 py-2.5 rounded-lg border bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-emerald-500"
+                                                />
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={handleSave}
+                                                disabled={isSaving}
+                                                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors inline-flex items-center gap-2 disabled:opacity-50"
+                                            >
+                                                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                                {isSaving ? '保存中...' : '保存通知设置'}
+                                            </button>
+                                            {saveStatus === 'success' && (
+                                                <p className="text-emerald-600 text-sm">通知设置已保存！</p>
+                                            )}
+                                            {saveStatus === 'invalid_webhook' && (
+                                                <p className="text-rose-600 text-sm">仅支持企业微信、钉钉或飞书的合法 HTTPS Webhook 地址。</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
                                 <div className={`p-6 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-black/10'
                                     }`}>
                                     <div className="flex items-start gap-4 mb-6">
@@ -522,8 +604,9 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                         </p>
                                     </div>
                                 </div>
+                                )}
 
-                                {/* Integration Card: Parent Adds Student Email & Connected Students */}
+                                {/* Integration Card: Connected Students / Guardian Binding */}
                                 <div className={`p-6 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-zinc-50 border-black/10'}`}>
                                     <div className="flex items-start gap-4 mb-6">
                                         <div className="p-3 bg-violet-500 rounded-lg text-white shadow-md">
@@ -551,11 +634,115 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                 </button>
                                             </div>
                                             <p className={`text-sm mt-1 ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                                由家长或教师直接输入孩子的 Vanpower / Google 登录邮箱添加绑定。绑定并完成学生登录授权后，您可在「家长督学看板」查看孩子完成的各科练习与进展，同时战报将自动抄送至您上方配置的 Discord 频道。
+                                                {cnMode
+                                                    ? '家长点击下方生成 6 位绑定邀请码发给孩子；或孩子在此输入家长提供的 6 位邀请码完成双向督学绑定。'
+                                                    : '由家长或教师直接输入孩子的 Vanpower / Google 登录邮箱添加绑定。绑定并完成学生登录授权后，您可在「家长督学看板」查看孩子完成的各科练习与进展，同时战报将自动抄送至您上方配置的 Discord 频道。'}
                                             </p>
                                         </div>
                                     </div>
 
+                                    {cnMode ? (
+                                        <div className="space-y-4 mb-5">
+                                            <div className="p-4 rounded-xl border bg-white border-zinc-200 space-y-2.5">
+                                                <div className="text-sm font-bold text-zinc-800">我是家长：生成孩子绑定邀请码</div>
+                                                <div className="flex flex-wrap items-center gap-2.5">
+                                                    <button
+                                                        type="button"
+                                                        disabled={inviteBusy}
+                                                        onClick={async () => {
+                                                            setInviteBusy(true);
+                                                            try {
+                                                                const res = await createGuardianInvite();
+                                                                setInviteInfo(res);
+                                                                setCopiedInvite(false);
+                                                            } finally {
+                                                                setInviteBusy(false);
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-lg disabled:opacity-50"
+                                                    >
+                                                        {inviteBusy ? '生成中...' : inviteInfo ? '重新生成绑定码' : '生成 6 位绑定码'}
+                                                    </button>
+                                                    {inviteInfo && (
+                                                        <>
+                                                            <span className="px-3 py-1.5 rounded-lg border border-zinc-300 bg-zinc-50 font-black tracking-[0.2em] text-zinc-900">
+                                                                {inviteInfo.code}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    const url = `${window.location.origin}/#/bind?code=${inviteInfo.code}`;
+                                                                    try {
+                                                                        await navigator.clipboard.writeText(`请打开 Vanpower K12 绑定家长督学（绑定码 ${inviteInfo.code}）：\n${url}`);
+                                                                        setCopiedInvite(true);
+                                                                        setTimeout(() => setCopiedInvite(false), 2500);
+                                                                    } catch {
+                                                                        // Ignore clipboard errors
+                                                                    }
+                                                                }}
+                                                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold"
+                                                            >
+                                                                {copiedInvite ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                                                {copiedInvite ? '已复制链接' : '复制微信邀请链接'}
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <form
+                                                onSubmit={async (e) => {
+                                                    e.preventDefault();
+                                                    const clean = acceptCodeInput.replace(/\D/g, '');
+                                                    if (clean.length !== 6) {
+                                                        setAcceptMsg({ kind: 'err', text: '请输入 6 位数字绑定码' });
+                                                        return;
+                                                    }
+                                                    setAcceptBusy(true);
+                                                    setAcceptMsg(null);
+                                                    try {
+                                                        const link = await acceptGuardianInvite(clean);
+                                                        setLinkedGuardians((prev) => [link, ...prev.filter((g) => g.id !== link.id)]);
+                                                        setAcceptCodeInput('');
+                                                        setAcceptMsg({ kind: 'ok', text: `已成功绑定家长「${link.parentName}」` });
+                                                    } catch (err) {
+                                                        setAcceptMsg({
+                                                            kind: 'err',
+                                                            text: err instanceof Error ? err.message : '绑定失败，请核对邀请码',
+                                                        });
+                                                    } finally {
+                                                        setAcceptBusy(false);
+                                                    }
+                                                }}
+                                                className="p-4 rounded-xl border bg-white border-zinc-200 space-y-2.5"
+                                            >
+                                                <div className="text-sm font-bold text-zinc-800">我是学生：输入家长 6 位绑定码</div>
+                                                <div className="flex flex-col sm:flex-row gap-2.5">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        maxLength={6}
+                                                        value={acceptCodeInput}
+                                                        onChange={(e) => setAcceptCodeInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                                        placeholder="输入 6 位数字绑定码"
+                                                        className="flex-1 px-3.5 py-2 rounded-lg border border-zinc-200 text-sm font-bold tracking-widest"
+                                                    />
+                                                    <button
+                                                        type="submit"
+                                                        disabled={acceptBusy}
+                                                        className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-lg disabled:opacity-50"
+                                                    >
+                                                        {acceptBusy ? '绑定中...' : '确认绑定家长'}
+                                                    </button>
+                                                </div>
+                                                {acceptMsg && (
+                                                    <p className={`text-xs font-bold ${acceptMsg.kind === 'ok' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                        {acceptMsg.text}
+                                                    </p>
+                                                )}
+                                            </form>
+                                        </div>
+                                    ) : (
                                     <form onSubmit={handleAddStudent} className="space-y-3 mb-5">
                                         <label className={`block text-sm font-medium ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
                                             添加学生邮箱账号
@@ -625,12 +812,15 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             </p>
                                         )}
                                     </form>
+                                    )}
 
                                     <div className="space-y-3">
                                         {connectedStudents.length > 0 ? (
                                             <div className="grid gap-3">
                                                 {connectedStudents.map((student) => {
-                                                    const displayLabel = student.studentName || student.studentEmail;
+                                                    const displayLabel =
+                                                        student.studentName ||
+                                                        (isSyntheticCnEmail(student.studentEmail) ? '微信同学' : student.studentEmail);
                                                     return (
                                                         <div key={student.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-lg border ${isDarkMode ? 'bg-zinc-900/50 border-white/5' : 'bg-white border-zinc-200'}`}>
                                                             <div className="flex items-center gap-3 min-w-0">
@@ -645,7 +835,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                                         {displayLabel}
                                                                     </div>
                                                                     <div className={`text-sm truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                                                        {student.studentEmail}
+                                                                        {formatAccountDisplay(student.studentEmail, 'wechat')}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -690,8 +880,12 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             </div>
                                         ) : (
                                             <div className={`text-center py-8 rounded-lg border border-dashed ${isDarkMode ? 'border-white/10 text-zinc-500 bg-zinc-900/50' : 'border-zinc-300 text-zinc-400 bg-white/50'}`}>
-                                                <p className="text-sm">暂未添加任何学生邮箱。</p>
-                                                <p className="text-xs mt-1">在上方输入孩子登录使用的 Google 邮箱即可完成绑定。</p>
+                                                <p className="text-sm">暂未绑定任何学生。</p>
+                                                <p className="text-xs mt-1">
+                                                    {cnMode
+                                                        ? '点击上方「生成 6 位绑定码」发给孩子确认即可完成绑定。'
+                                                        : '在上方输入孩子登录使用的 Google 邮箱即可完成绑定。'}
+                                                </p>
                                             </div>
                                         )}
                                     </div>
@@ -712,7 +906,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                                                 {guardian.parentName}
                                                             </div>
                                                             <div className={`text-xs truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                                                {guardian.parentEmail}
+                                                                {formatAccountDisplay(guardian.parentEmail, 'wechat')}
                                                             </div>
                                                         </div>
                                                         <div className="flex items-center gap-2 shrink-0">

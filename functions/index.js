@@ -623,3 +623,257 @@ exports.evaluateWordsmithSentence = onRequest(
     });
   }
 );
+
+const PRACTICE_VALID_SUBJECTS = new Set([
+  "english",
+  "ig-math",
+  "shanghai-math",
+  "humanity",
+  "science"
+]);
+const PRACTICE_VALID_GRADES = new Set(["G6", "G7"]);
+const PRACTICE_VALID_DIFFS = new Set(["all", "foundation", "standard", "challenge"]);
+
+function buildPracticeCurriculumContext(subjectId, grade, trackId, trackName, topics) {
+  const gradeStr = grade === "G6" ? "Grade 6 (age 11-12)" : "Grade 7 (age 12-13)";
+  const trackLine = trackName
+    ? `Active Unit / Track: ${trackName}${trackId ? ` (${trackId})` : ""}.`
+    : "";
+  const topicLine =
+    topics.length > 0 ? `Curriculum Topics to cover: ${topics.join(", ")}.` : "";
+
+  if (subjectId === "shanghai-math") {
+    return {
+      langRule:
+        "- ALL fields (question, options, explanation, topic) MUST be strictly written in Simplified Chinese (简体中文).",
+      curriculum: `Shanghai Five-Four Curriculum (沪教版五四制) Mathematics for ${grade === "G6" ? "六年级" : "七年级"}. ${trackLine} ${topicLine}`,
+      guard:
+        "- Problems must require genuine multi-step reasoning or conceptual understanding rather than trivial recall. Include varied real-world contexts or fresh numbers."
+    };
+  }
+  if (subjectId === "ig-math") {
+    return {
+      langRule:
+        "- ALL fields (question, options, explanation, topic) MUST be strictly written in clear academic English.",
+      curriculum: `Cambridge Lower Secondary / International Mathematics (${grade === "G6" ? "Stage 7 / UKMT Junior" : "Stage 8 / AMC 8"}) for ${gradeStr}. ${trackLine} ${topicLine}`,
+      guard:
+        "- Vary contexts creatively (architecture, astronomy, sports telemetry, finance, geometry puzzles). Avoid repetitive textbook templates."
+    };
+  }
+  if (subjectId === "science") {
+    return {
+      langRule:
+        "- ALL fields (question, options, explanation, topic) MUST be strictly written in clear Cambridge Science English.",
+      curriculum: `Cambridge Lower Secondary Science ${grade === "G6" ? "Stage 7 (0893)" : "Stage 8 (0893)"} for ${gradeStr}. ${trackLine} ${topicLine}`,
+      guard:
+        "- Design experiment-based, data-interpretation, cause-and-effect, or quantitative reasoning scenarios with fresh contexts and realistic lab observations."
+    };
+  }
+  if (subjectId === "humanity") {
+    return {
+      langRule:
+        "- ALL fields (question, options, explanation, topic) MUST be strictly written in clear academic English.",
+      curriculum:
+        grade === "G6"
+          ? `SUIS / IB MYP / Oxford / TCI Grade 6 World Humanities & Geography. ${trackLine} ${topicLine}`
+          : `Middle School World History & Human Geography for ${gradeStr}. ${trackLine} ${topicLine}`,
+      guard:
+        "- Strictly stay aligned with World Biomes, Early Humans, Ancient River/Classical Civilizations, GRAPES historical analysis, or Map & Geographic Inquiry. Do NOT ask Chinese domestic history/geography trivia questions."
+    };
+  }
+  return {
+    langRule:
+      "- ALL fields (question, options, explanation, topic) MUST be strictly written in clear English.",
+    curriculum: `International School English Language Arts (vocabulary in context, nuanced grammar, punctuation, figurative language, rhetoric, and short passage inference) for ${gradeStr}. ${topicLine}`,
+    guard:
+      "- Create brand-new sentences, short 2-3 sentence mini-passages, or precise editing items so the student cannot guess by memorizing static templates."
+  };
+}
+
+exports.generatePracticeQuestions = onCall(
+  {
+    secrets: [geminiApiKeySecret],
+    cors: true,
+    timeoutSeconds: 45,
+    memory: "512MiB"
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not configured.");
+    }
+
+    const data = request.data || {};
+    const subjectId = typeof data.subjectId === "string" ? data.subjectId.trim() : "";
+    if (!PRACTICE_VALID_SUBJECTS.has(subjectId)) {
+      throw new HttpsError("invalid-argument", "Invalid subjectId.");
+    }
+    const grade = PRACTICE_VALID_GRADES.has(data.grade) ? data.grade : "G6";
+    const difficulty = PRACTICE_VALID_DIFFS.has(data.difficulty) ? data.difficulty : "all";
+    const trackId =
+      typeof data.trackId === "string" ? data.trackId.trim().slice(0, 64) : "";
+    const trackName =
+      typeof data.trackName === "string" ? data.trackName.trim().slice(0, 120) : "";
+    const topics = Array.isArray(data.topics)
+      ? data.topics
+          .filter((t) => typeof t === "string")
+          .map((t) => t.replace(/\s+/g, " ").trim().slice(0, 80))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    const requestedCount = Number(data.count);
+    const count = Number.isFinite(requestedCount)
+      ? Math.min(8, Math.max(1, Math.round(requestedCount)))
+      : 5;
+    const cleanRecent = Array.isArray(data.recentStems)
+      ? data.recentStems
+          .filter((s) => typeof s === "string")
+          .map((s) => s.replace(/\s+/g, " ").trim().slice(0, 140))
+          .filter(Boolean)
+          .slice(0, 24)
+      : [];
+
+    const { langRule, curriculum, guard } = buildPracticeCurriculumContext(
+      subjectId,
+      grade,
+      trackId,
+      trackName,
+      topics
+    );
+    const [theme1, theme2] = pickDistinctThemes();
+
+    const diffInstruction =
+      difficulty === "all"
+        ? `- Mix difficulty levels across the ${count} questions (roughly equal balance of "foundation", "standard", and "challenge").`
+        : `- Every question MUST match the "${difficulty}" difficulty tier ("foundation" = core concepts/single-step, "standard" = multi-step curriculum application, "challenge" = deeper inquiry/synthesis/Olympiad).`;
+
+    const antiRepeat =
+      cleanRecent.length > 0
+        ? `- NEVER repeat, paraphrase, or merely swap numbers from these recently seen stems:\n  ${cleanRecent
+            .map((s, idx) => `${idx + 1}. ${s}`)
+            .join("\n  ")}`
+        : "- Make every question fresh and non-repetitive.";
+
+    const prompt = `You are an expert international-school curriculum assessment author.
+Generate exactly ${count} fresh multiple-choice questions for:
+${curriculum}
+
+Creative context inspiration: "${theme1}" and "${theme2}".
+Requirements:
+${langRule}
+${diffInstruction}
+${guard}
+${antiRepeat}
+- Each question MUST have:
+  - "question": clear prompt (max 520 characters)
+  - "options": array of EXACTLY 4 distinct options (each max 240 characters, no "A./B." prefixes inside option text)
+  - "answerIndex": integer 0, 1, 2, or 3 indicating the single unambiguously correct option
+  - "explanation": concise, accurate step-by-step explanation (max 380 characters)
+  - "topic": specific short sub-topic label (max 65 characters)
+  - "difficulty": one of "foundation", "standard", "challenge"
+- Verify every fact, formula, and calculation carefully before outputting JSON.`;
+
+    const ai = new GoogleGenAI({ apiKey });
+    try {
+      const response = await generateWithFallback(
+        ai,
+        {
+          contents: prompt,
+          config: {
+            temperature: 0.9,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  answerIndex: { type: Type.INTEGER },
+                  explanation: { type: Type.STRING },
+                  topic: { type: Type.STRING },
+                  difficulty: { type: Type.STRING }
+                },
+                required: [
+                  "question",
+                  "options",
+                  "answerIndex",
+                  "explanation",
+                  "topic",
+                  "difficulty"
+                ]
+              }
+            }
+          }
+        },
+        "PracticeDynamic"
+      );
+
+      const rawList = parseLLMJSON(response.text || "[]");
+      if (!Array.isArray(rawList)) {
+        return { questions: [] };
+      }
+
+      const recentNormSet = new Set(
+        cleanRecent.map((s) => s.replace(/\s+/g, " ").trim().toLowerCase())
+      );
+      const batchNormSet = new Set();
+      const validated = [];
+
+      for (const item of rawList) {
+        if (!item || typeof item !== "object") continue;
+        const qText =
+          typeof item.question === "string"
+            ? item.question.replace(/\s+/g, " ").trim().slice(0, 550)
+            : "";
+        if (!qText) continue;
+        const normQ = qText.toLowerCase();
+        if (recentNormSet.has(normQ) || batchNormSet.has(normQ)) continue;
+
+        if (!Array.isArray(item.options) || item.options.length !== 4) continue;
+        const cleanOpts = item.options.map((opt) =>
+          typeof opt === "string" ? opt.replace(/\s+/g, " ").trim().slice(0, 280) : ""
+        );
+        if (cleanOpts.some((opt) => !opt) || new Set(cleanOpts).size !== 4) continue;
+
+        const ansIdx = Number(item.answerIndex);
+        if (!Number.isInteger(ansIdx) || ansIdx < 0 || ansIdx > 3) continue;
+
+        const expText =
+          typeof item.explanation === "string"
+            ? item.explanation.replace(/\s+/g, " ").trim().slice(0, 400)
+            : "";
+        if (!expText) continue;
+
+        const topicText =
+          typeof item.topic === "string"
+            ? item.topic.replace(/\s+/g, " ").trim().slice(0, 70)
+            : trackName || subjectId;
+        const itemDiff = ["foundation", "standard", "challenge"].includes(item.difficulty)
+          ? item.difficulty
+          : difficulty === "all"
+            ? "standard"
+            : difficulty;
+
+        batchNormSet.add(normQ);
+        validated.push({
+          question: qText,
+          options: cleanOpts,
+          answerIndex: ansIdx,
+          explanation: expText,
+          topic: topicText,
+          difficulty: itemDiff
+        });
+        if (validated.length >= count) break;
+      }
+
+      return { questions: validated };
+    } catch (error) {
+      console.error("Failed to generate dynamic practice questions:", error);
+      throw new HttpsError("internal", "Failed to generate dynamic practice questions.");
+    }
+  }
+);

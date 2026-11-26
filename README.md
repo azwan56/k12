@@ -17,7 +17,7 @@ Vanpower K12 (`https://k12.vanpower.live`) 是面向六年级 / 七年级学生�
 │   ├── hooks/                    # Auth / Profile / Rewards React Context Hooks
 │   └── lib/                      # Firebase 初始化与安全校验工具
 ├── functions/                    # 统一托管的 K12 Firebase Cloud Functions (`codebase: "k12"`)
-│   ├── index.js                  # generateMathQuestions, getFinalFeedback, generateWordsmithBatch, evaluateWordsmithSentence
+│   ├── index.js                  # generateMathQuestions, getFinalFeedback, generateWordsmithBatch, evaluateWordsmithSentence, generatePracticeQuestions
 │   └── package.json
 ├── firestore.rules               # Firestore 安全规则（含 /users, /guardian_links, /student_progress 及 activities 子集合）
 └── firebase.json                 # Hosting (k12-vanpower), Firestore, Functions (codebase: k12)
@@ -35,11 +35,11 @@ npm run build    # 构建生产包至 dist/
 
 ## 部署注意事项（重要）
 
-Firebase 项目 `vanpower-f15f9` 与主站及其他服务共享云函数命名空间。**严禁**执行无过滤的全局 `firebase deploy --only functions`。请仅定向部署本仓库维护的 4 个 K12 函数：
+Firebase 项目 `vanpower-f15f9` 与主站及其他服务共享云函数命名空间。**严禁**执行无过滤的全局 `firebase deploy --only functions`。请仅定向部署本仓库维护的 5 个 K12 函数：
 
 ```bash
 firebase deploy --only firestore:rules,hosting --project vanpower-f15f9
-firebase deploy --only functions:k12:generateMathQuestions,functions:k12:getFinalFeedback,functions:k12:evaluateWordsmithSentence,functions:k12:generateWordsmithBatch --project vanpower-f15f9
+firebase deploy --only functions:k12:generateMathQuestions,functions:k12:getFinalFeedback,functions:k12:evaluateWordsmithSentence,functions:k12:generateWordsmithBatch,functions:k12:generatePracticeQuestions --project vanpower-f15f9
 ```
 
 ## 家长督学功能说明

@@ -6,6 +6,7 @@ import {
   type GradeLevel,
   type PracticeDifficulty,
 } from '../../data/k12Subjects';
+import { SEASONS } from '../../apps/humanity/seasonData';
 import {
   drawUnseenFromStorage,
   getRecentMathStems,
@@ -109,6 +110,62 @@ describe('Expanded K12 question banks and essay prompts', () => {
     assert.equal(new Set(ESSAY_PROMPTS.map((p) => p.id)).size, ESSAY_PROMPTS.length);
     assert.ok(ESSAY_PROMPTS.filter((p) => p.grade === 'G6').length >= 6);
     assert.ok(ESSAY_PROMPTS.filter((p) => p.grade === 'G7').length >= 6);
+  });
+
+  it('aligns G6 Humanity to 4 textbook tracks without leaking 中华历史地理大闯关 questions', () => {
+    const subj = SUBJECTS.find((s) => s.id === 'humanity');
+    assert.ok(subj, 'Missing humanity subject');
+    const g6Tracks = subj.tracks?.G6 ?? [];
+    assert.deepEqual(
+      g6Tracks.map((t) => t.id),
+      ['biomes', 'early-humans', 'civilizations', 'geography-skills']
+    );
+
+    const diffs: PracticeDifficulty[] = ['foundation', 'standard', 'challenge'];
+    const adventurePrompts = new Set(
+      SEASONS.flatMap((s) => s.data.flat()).map((q) => q.question.replace(/\s+/g, ' ').trim().toLowerCase())
+    );
+
+    for (const track of g6Tracks) {
+      const pool = subj.questions.filter((q) => q.grade === 'G6' && q.track === track.id);
+      assert.ok(pool.length >= 30, `humanity G6/${track.id} expected >= 30, got ${pool.length}`);
+      for (const d of diffs) {
+        const dPool = pool.filter((q) => q.difficulty === d);
+        assert.ok(dPool.length >= 10, `humanity G6/${track.id}/${d} expected >= 10, got ${dPool.length}`);
+      }
+      for (const q of pool) {
+        assert.ok(q.topic && q.topic.trim().length > 0 && q.topic.length <= 80, `${q.id} invalid topic`);
+        assert.ok(q.question.length <= 600, `${q.id} question exceeds Firestore limit`);
+        assert.ok(q.options.every((o) => o.length <= 300), `${q.id} option exceeds Firestore limit`);
+        const norm = q.question.replace(/\s+/g, ' ').trim().toLowerCase();
+        assert.equal(adventurePrompts.has(norm), false, `${q.id} overlaps 中华历史地理大闯关`);
+      }
+    }
+  });
+
+  it('aligns G6 Science to 3 Cambridge Stage 7 tracks with 45+ tiered questions per track', () => {
+    const subj = SUBJECTS.find((s) => s.id === 'science');
+    assert.ok(subj, 'Missing science subject');
+    const g6Tracks = subj.tracks?.G6 ?? [];
+    assert.deepEqual(
+      g6Tracks.map((t) => t.id),
+      ['physics', 'biology', 'chemistry']
+    );
+
+    const diffs: PracticeDifficulty[] = ['foundation', 'standard', 'challenge'];
+    for (const track of g6Tracks) {
+      const pool = subj.questions.filter((q) => q.grade === 'G6' && q.track === track.id);
+      assert.ok(pool.length >= 45, `science G6/${track.id} expected >= 45, got ${pool.length}`);
+      for (const d of diffs) {
+        const dPool = pool.filter((q) => q.difficulty === d);
+        assert.ok(dPool.length >= 15, `science G6/${track.id}/${d} expected >= 15, got ${dPool.length}`);
+      }
+      for (const q of pool) {
+        assert.ok(q.topic && q.topic.trim().length > 0 && q.topic.length <= 80, `${q.id} invalid topic`);
+        assert.ok(q.question.length <= 600, `${q.id} question exceeds Firestore limit`);
+        assert.ok(q.options.every((o) => o.length <= 300), `${q.id} option exceeds Firestore limit`);
+      }
+    }
   });
 });
 

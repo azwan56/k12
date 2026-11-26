@@ -4,23 +4,35 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   setDoc,
+  type Unsubscribe,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { isCnRegion } from '../lib/region';
+import { cnApi } from '../lib/cnApi';
 import type { GradeLevel, SubjectId } from '../data/k12Subjects';
 import { getLearningProfile } from '../apps/mathgenius/services/learningProfileService';
 import { getUserHistory } from '../apps/wordsmith/services/storageService';
 import type { GuardianLink } from './guardianLinks';
 import { MAX_PHOTO_URL_LENGTH, isValidEmailAddress, normalizeEmail } from './guardianLinks';
 import { syncStudentLinksProfile } from './guardianLinkService';
+import {
+  buildDeterministicActivityId,
+  enqueuePendingActivity,
+  getGuestPendingActivities,
+  getPendingActivitiesForUid,
+  removePendingActivity,
+} from './pendingActivityQueue';
 import type { AvatarId, PortalProfile } from './profile';
 import type { RewardsState } from './rewards';
 import {
-  type ActivityType,
   type QuestionReviewItem,
+  type RecordActivityInput,
   type StudentActivityRecord,
   type StudentProgressSummary,
   type SubjectStatSummary,
@@ -29,11 +41,14 @@ import {
   buildRewardsSummary,
   computeWordsmithStats,
   encodeStudentEmailKey,
+  isIncompleteActivity,
   loadLocalHumanityLevels,
   sanitizeStudentActivityRecord,
   sanitizeStudentProgressSummary,
   sanitizeSubjectStats,
 } from './studentProgress';
+
+export type { RecordActivityInput };
 
 export const STUDENT_PROGRESS_COLLECTION = 'student_progress';
 export const ACTIVITIES_SUBCOLLECTION = 'activities';
@@ -49,26 +64,6 @@ export interface AuthUserLike {
   uid: string;
   email?: string | null;
   photoURL?: string | null;
-}
-
-export interface RecordActivityInput {
-  id?: string;
-  type: ActivityType;
-  subjectId: SubjectId;
-  title: string;
-  grade: GradeLevel;
-  score: number;
-  maxScore: number;
-  accuracyPct?: number;
-  durationSec?: number | null;
-  summary?: string;
-  aiFeedback?: string | null;
-  essayContent?: string | null;
-  difficulty?: string | null;
-  weakPoints?: string[];
-  questionItems?: QuestionReviewItem[];
-  wordItems?: WordsmithReviewItem[];
-  createdAt?: number;
 }
 
 const uidWriteQueues = new Map<string, Promise<unknown>>();
@@ -208,6 +203,85 @@ export async function syncStudentProgressSnapshot(
   const studentEmailEncoded = encodeStudentEmailKey(studentEmail);
 
   await enqueueUidWrite(user.uid, async () => {
+    if (isCnRegion()) {
+      const existingRes = await cnApi.getProgressSummary();
+      const existingData = existingRes.summary as unknown as Record<string, unknown> | null;
+      let subjectStats = sanitizeSubjectStats(existingData?.subjectStats);
+      let lastActivityAt =
+        typeof existingData?.lastActivityAt === 'number' && existingData.lastActivityAt > 0
+          ? existingData.lastActivityAt
+          : null;
+
+      if (!existingRes.summary) {
+        const initialPayload = buildSummaryPayload({
+          user,
+          studentEmail,
+          meta,
+          subjectStats,
+          lastActivityAt,
+          now: Date.now(),
+        });
+        await cnApi.putProgressSummary(initialPayload);
+      }
+
+      const backfillKey = `k12_ws_backfill_v1_${user.uid}`;
+      const alreadyBackfilled =
+        typeof localStorage !== 'undefined' && localStorage.getItem(backfillKey) === '1';
+
+      if (!alreadyBackfilled) {
+        const records = buildWordsmithBackfillRecords(
+          user,
+          studentEmail,
+          studentEmailEncoded,
+          meta.profile.grade
+        );
+        let backfillFailures = 0;
+        if (records.length > 0) {
+          const shouldRollIntoStats = Object.keys(subjectStats).length === 0;
+          for (const rec of records) {
+            try {
+              if (shouldRollIntoStats) {
+                subjectStats = applyActivityToSubjectStats(subjectStats, rec);
+              }
+              if (!lastActivityAt || rec.createdAt > lastActivityAt) {
+                lastActivityAt = rec.createdAt;
+              }
+              const summarySnap = buildSummaryPayload({
+                user,
+                studentEmail,
+                meta,
+                subjectStats,
+                lastActivityAt,
+                now: Date.now(),
+              });
+              await cnApi.postActivityBatch({ activity: rec, summary: summarySnap, isComplete: true });
+            } catch (err) {
+              backfillFailures += 1;
+              console.warn(`[syncStudentProgressSnapshot:cn] Failed to backfill ${rec.id}:`, err);
+            }
+          }
+        }
+        if (backfillFailures === 0 && typeof localStorage !== 'undefined') {
+          try {
+            localStorage.setItem(backfillKey, '1');
+          } catch {
+            // Ignore storage quota issues
+          }
+        }
+      }
+
+      const payload = buildSummaryPayload({
+        user,
+        studentEmail,
+        meta,
+        subjectStats,
+        lastActivityAt,
+        now: Date.now(),
+      });
+      await cnApi.putProgressSummary(payload);
+      return;
+    }
+
     const summaryRef = doc(db, STUDENT_PROGRESS_COLLECTION, user.uid);
     const existingSnap = await getDoc(summaryRef);
     const existingData = existingSnap.exists()
@@ -299,76 +373,241 @@ export async function recordStudentActivity(
   meta: StudentSyncMeta,
   input: RecordActivityInput
 ): Promise<string | null> {
+  const now = Date.now();
+  const isComplete = input.isComplete !== false;
+  const createdAt =
+    typeof input.createdAt === 'number' && input.createdAt > 0 ? Math.floor(input.createdAt) : now;
+  const rawId = input.id || buildDeterministicActivityId(input.type, createdAt);
+
+  // Persist into durable local outbox BEFORE network I/O so guest sessions or network drops never lose data.
+  const queuedInput: RecordActivityInput = {
+    ...input,
+    id: rawId,
+    createdAt,
+  };
+  const queuedEntry = enqueuePendingActivity(user?.uid ?? null, queuedInput);
+
   const studentEmail = normalizeEmail(user?.email);
   if (!user?.uid || !isValidEmailAddress(studentEmail)) return null;
   const studentEmailEncoded = encodeStudentEmailKey(studentEmail);
 
-  const now = Date.now();
-  const createdAt =
-    typeof input.createdAt === 'number' && input.createdAt > 0 ? Math.floor(input.createdAt) : now;
-  const rawId =
-    input.id || `${input.type}_${createdAt}_${Math.random().toString(36).slice(2, 6)}`;
-
   const record = sanitizeStudentActivityRecord(rawId, {
-    ...input,
-    id: rawId,
+    ...queuedInput,
     studentUid: user.uid,
     studentEmail,
     studentEmailEncoded,
     createdAt,
     updatedAt: now,
   });
-  if (!record) return null;
+  if (!record) {
+    removePendingActivity(rawId, queuedEntry.updatedAt);
+    return null;
+  }
 
   let persistedId: string | null = null;
 
   await enqueueUidWrite(user.uid, async () => {
-    const summaryRef = doc(db, STUDENT_PROGRESS_COLLECTION, user.uid);
-    const existingSnap = await getDoc(summaryRef);
-    const existingData = existingSnap.exists()
-      ? (existingSnap.data() as Record<string, unknown>)
-      : null;
-
-    const prevStats = sanitizeSubjectStats(existingData?.subjectStats);
-    const prevLast =
-      typeof existingData?.lastActivityAt === 'number' && existingData.lastActivityAt > 0
-        ? existingData.lastActivityAt
-        : null;
-
-    let activitySaved = false;
-    try {
-      await setDoc(
-        doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, record.id),
-        record
-      );
-      activitySaved = true;
-      persistedId = record.id;
-    } catch (err) {
-      console.warn('[recordStudentActivity] Failed to save activity doc:', err);
+    if (isCnRegion()) {
+      try {
+        const [summaryRes, existingActs] = await Promise.all([
+          cnApi.getProgressSummary(),
+          cnApi.fetchOwnActivities(150),
+        ]);
+        const existingAct = existingActs.find((a) => a.id === record.id) ?? null;
+        const wasAlreadyCompleted = existingAct !== null && !isIncompleteActivity(existingAct);
+        if (existingAct && wasAlreadyCompleted) {
+          removePendingActivity(record.id, queuedEntry.updatedAt);
+          persistedId = record.id;
+          return;
+        }
+        if (existingAct && !wasAlreadyCompleted && !isComplete) {
+          const isStaleOutOfOrder =
+            record.type === 'wordsmith'
+              ? record.wordItems.length < existingAct.wordItems.length
+              : record.questionItems.length < existingAct.questionItems.length;
+          if (isStaleOutOfOrder) {
+            removePendingActivity(record.id, queuedEntry.updatedAt);
+            persistedId = record.id;
+            return;
+          }
+        }
+        const writeNow = Date.now();
+        const recordToWrite: StudentActivityRecord = existingAct
+          ? {
+              ...record,
+              createdAt: existingAct.createdAt,
+              updatedAt: Math.max(writeNow, existingAct.updatedAt, record.updatedAt),
+            }
+          : record;
+        const existingData = summaryRes.summary as unknown as Record<string, unknown> | null;
+        const prevStats = sanitizeSubjectStats(existingData?.subjectStats);
+        const prevLast =
+          typeof existingData?.lastActivityAt === 'number' && existingData.lastActivityAt > 0
+            ? existingData.lastActivityAt
+            : null;
+        const nextStats = isComplete ? applyActivityToSubjectStats(prevStats, recordToWrite) : prevStats;
+        const nextLastActivityAt = Math.max(
+          prevLast ?? 0,
+          recordToWrite.updatedAt,
+          recordToWrite.createdAt
+        );
+        const summaryPayload = buildSummaryPayload({
+          user,
+          studentEmail,
+          meta,
+          subjectStats: nextStats,
+          lastActivityAt: nextLastActivityAt,
+          now: writeNow,
+        });
+        await cnApi.postActivityBatch({
+          activity: recordToWrite,
+          summary: summaryPayload,
+          isComplete,
+        });
+        removePendingActivity(record.id, queuedEntry.updatedAt);
+        persistedId = record.id;
+      } catch (err) {
+        console.warn('[recordStudentActivity:cn] Failed to persist batch, kept in outbox:', err);
+      }
+      return;
     }
 
-    const nextStats = activitySaved ? applyActivityToSubjectStats(prevStats, record) : prevStats;
-    const nextLastActivityAt = activitySaved
-      ? Math.max(prevLast ?? 0, record.createdAt)
-      : prevLast;
+    const summaryRef = doc(db, STUDENT_PROGRESS_COLLECTION, user.uid);
+    const actRef = doc(db, STUDENT_PROGRESS_COLLECTION, user.uid, ACTIVITIES_SUBCOLLECTION, record.id);
 
-    const summaryPayload = buildSummaryPayload({
-      user,
-      studentEmail,
-      meta,
-      subjectStats: nextStats,
-      lastActivityAt: nextLastActivityAt,
-      now: Date.now(),
-    });
-    await setDoc(summaryRef, summaryPayload);
+    try {
+      const [existingSnap, existingActSnap] = await Promise.all([
+        getDoc(summaryRef),
+        getDoc(actRef),
+      ]);
 
-    void syncStudentLinksProfile(user, {
-      displayName: meta.resolvedName,
-      avatarId: meta.effectiveAvatarId,
-    }).catch(() => {});
+      const existingAct = existingActSnap.exists()
+        ? sanitizeStudentActivityRecord(record.id, existingActSnap.data())
+        : null;
+      const wasAlreadyCompleted = existingAct !== null && !isIncompleteActivity(existingAct);
+
+      // Idempotency guard: completed records are never overwritten with stale outbox data or double-counted.
+      if (existingAct && wasAlreadyCompleted) {
+        removePendingActivity(record.id, queuedEntry.updatedAt);
+        persistedId = record.id;
+        return;
+      }
+
+      if (existingAct && !wasAlreadyCompleted && !isComplete) {
+        const isStaleOutOfOrder =
+          record.type === 'wordsmith'
+            ? record.wordItems.length < existingAct.wordItems.length
+            : record.questionItems.length < existingAct.questionItems.length;
+        if (isStaleOutOfOrder) {
+          removePendingActivity(record.id, queuedEntry.updatedAt);
+          persistedId = record.id;
+          return;
+        }
+      }
+
+      const writeNow = Date.now();
+      const recordToWrite: StudentActivityRecord = existingAct
+        ? {
+            ...record,
+            createdAt: existingAct.createdAt,
+            updatedAt: Math.max(writeNow, existingAct.updatedAt, record.updatedAt),
+          }
+        : record;
+
+      const existingData = existingSnap.exists()
+        ? (existingSnap.data() as Record<string, unknown>)
+        : null;
+
+      const prevStats = sanitizeSubjectStats(existingData?.subjectStats);
+      const prevLast =
+        typeof existingData?.lastActivityAt === 'number' && existingData.lastActivityAt > 0
+          ? existingData.lastActivityAt
+          : null;
+
+      const nextStats = isComplete ? applyActivityToSubjectStats(prevStats, recordToWrite) : prevStats;
+      const nextLastActivityAt = Math.max(
+        prevLast ?? 0,
+        recordToWrite.updatedAt,
+        recordToWrite.createdAt
+      );
+
+      const summaryPayload = buildSummaryPayload({
+        user,
+        studentEmail,
+        meta,
+        subjectStats: nextStats,
+        lastActivityAt: nextLastActivityAt,
+        now: writeNow,
+      });
+
+      const batch = writeBatch(db);
+      batch.set(actRef, recordToWrite);
+      batch.set(summaryRef, summaryPayload);
+      await batch.commit();
+
+      removePendingActivity(record.id, queuedEntry.updatedAt);
+      persistedId = record.id;
+
+      if (!existingAct || isComplete) {
+        void syncStudentLinksProfile(user, {
+          displayName: meta.resolvedName,
+          avatarId: meta.effectiveAvatarId,
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[recordStudentActivity] Failed to commit activity batch, kept in local outbox for retry:', err);
+    }
   });
 
   return persistedId;
+}
+
+export async function flushPendingActivitiesForUser(
+  user: AuthUserLike | null | undefined,
+  meta: StudentSyncMeta
+): Promise<{ synced: number; failed: number }> {
+  const studentEmail = normalizeEmail(user?.email);
+  if (!user?.uid || !isValidEmailAddress(studentEmail)) {
+    return { synced: 0, failed: 0 };
+  }
+  const pending = getPendingActivitiesForUid(user.uid);
+  if (pending.length === 0) return { synced: 0, failed: 0 };
+
+  let synced = 0;
+  let failed = 0;
+  for (const entry of pending) {
+    const id = await recordStudentActivity(user, meta, entry.input);
+    if (id) {
+      synced += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  return { synced, failed };
+}
+
+export async function claimAndFlushGuestActivities(
+  user: AuthUserLike | null | undefined,
+  meta: StudentSyncMeta
+): Promise<{ synced: number; failed: number }> {
+  const studentEmail = normalizeEmail(user?.email);
+  if (!user?.uid || !isValidEmailAddress(studentEmail)) {
+    return { synced: 0, failed: 0 };
+  }
+  const guestEntries = getGuestPendingActivities();
+  if (guestEntries.length === 0) return { synced: 0, failed: 0 };
+
+  let synced = 0;
+  let failed = 0;
+  for (const entry of guestEntries) {
+    const id = await recordStudentActivity(user, meta, entry.input);
+    if (id) {
+      synced += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  return { synced, failed };
 }
 
 export async function updateStudentActivityFeedback(
@@ -381,6 +620,10 @@ export async function updateStudentActivityFeedback(
   if (!user?.uid || !isValidEmailAddress(studentEmail) || !activityId || !trimmed) return;
 
   await enqueueUidWrite(user.uid, async () => {
+    if (isCnRegion()) {
+      await cnApi.patchActivityFeedback(activityId, trimmed.slice(0, 3000));
+      return;
+    }
     const ref = doc(
       db,
       STUDENT_PROGRESS_COLLECTION,
@@ -409,6 +652,17 @@ export async function fetchLinkedStudentProgress(
     return { summary: null, activities: [] };
   }
 
+  if (isCnRegion()) {
+    const data = await cnApi.fetchLinkedStudentProgress(link.studentUid);
+    const summary = data.summary ? sanitizeStudentProgressSummary(data.summary) : null;
+    const activities = Array.isArray(data.activities)
+      ? data.activities
+          .map((item) => sanitizeStudentActivityRecord(item.id, item))
+          .filter((item): item is StudentActivityRecord => item !== null)
+      : [];
+    return { summary, activities };
+  }
+
   let summary: StudentProgressSummary | null = null;
   try {
     const snap = await getDoc(doc(db, STUDENT_PROGRESS_COLLECTION, link.studentUid));
@@ -431,7 +685,7 @@ export async function fetchLinkedStudentProgress(
     const activitiesQuery = query(
       collection(db, STUDENT_PROGRESS_COLLECTION, summary.studentUid, ACTIVITIES_SUBCOLLECTION),
       orderBy('createdAt', 'desc'),
-      limit(40)
+      limit(100)
     );
     const actSnap = await getDocs(activitiesQuery);
     const activities: StudentActivityRecord[] = [];
@@ -445,4 +699,173 @@ export async function fetchLinkedStudentProgress(
     console.warn('[fetchLinkedStudentProgress] Failed to load activities:', err);
     return { summary, activities: [], activitiesError: true };
   }
+}
+
+export function subscribeLinkedStudentProgress(
+  link: GuardianLink,
+  onUpdate: (result: LinkedStudentProgressResult) => void,
+  onError: (err: unknown) => void
+): Unsubscribe {
+  if (!link.studentUid) {
+    onUpdate({ summary: null, activities: [] });
+    return () => {};
+  }
+
+  if (isCnRegion()) {
+    let disposed = false;
+    const pollOnce = () => {
+      if (disposed) return;
+      void fetchLinkedStudentProgress(link)
+        .then((res) => {
+          if (!disposed) onUpdate(res);
+        })
+        .catch((err) => {
+          if (!disposed) onError(err);
+        });
+    };
+
+    pollOnce();
+    const timer = window.setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        pollOnce();
+      }
+    }, 15_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        pollOnce();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+    }
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+      }
+    };
+  }
+
+  let disposed = false;
+  let latestSummary: StudentProgressSummary | null = null;
+  let latestActivities: StudentActivityRecord[] = [];
+  let activitiesError = false;
+  let subscribedUid: string | null = null;
+  let unsubActivities: Unsubscribe | null = null;
+
+  const teardownActivities = () => {
+    if (unsubActivities) {
+      unsubActivities();
+      unsubActivities = null;
+    }
+    subscribedUid = null;
+    latestActivities = [];
+    activitiesError = false;
+  };
+
+  const emit = () => {
+    if (disposed) return;
+    onUpdate({
+      summary: latestSummary,
+      activities: latestActivities,
+      ...(activitiesError ? { activitiesError: true } : {}),
+    });
+  };
+
+  const summaryRef = doc(db, STUDENT_PROGRESS_COLLECTION, link.studentUid);
+  const unsubSummary = onSnapshot(
+    summaryRef,
+    (snap) => {
+      if (disposed) return;
+      if (!snap.exists()) {
+        latestSummary = null;
+        teardownActivities();
+        emit();
+        return;
+      }
+
+      const parsed = sanitizeStudentProgressSummary(snap.data());
+      if (!parsed) {
+        latestSummary = null;
+        teardownActivities();
+        emit();
+        return;
+      }
+
+      latestSummary = parsed;
+      emit();
+
+      if (subscribedUid !== parsed.studentUid) {
+        teardownActivities();
+        subscribedUid = parsed.studentUid;
+        const activitiesQuery = query(
+          collection(db, STUDENT_PROGRESS_COLLECTION, parsed.studentUid, ACTIVITIES_SUBCOLLECTION),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+        unsubActivities = onSnapshot(
+          activitiesQuery,
+          (actSnap) => {
+            if (disposed) return;
+            const list: StudentActivityRecord[] = [];
+            actSnap.forEach((docSnap) => {
+              const item = sanitizeStudentActivityRecord(docSnap.id, docSnap.data());
+              if (item) list.push(item);
+            });
+            latestActivities = list;
+            activitiesError = false;
+            emit();
+          },
+          (err) => {
+            if (disposed) return;
+            console.warn('[subscribeLinkedStudentProgress] Failed to watch activities:', err);
+            activitiesError = true;
+            emit();
+          }
+        );
+      }
+    },
+    (err) => {
+      if (disposed) return;
+      teardownActivities();
+      const code = (err as { code?: unknown })?.code;
+      if (code === 'permission-denied') {
+        onUpdate({ summary: null, activities: [], syncPending: true });
+        return;
+      }
+      onError(err);
+    }
+  );
+
+  return () => {
+    disposed = true;
+    unsubSummary();
+    teardownActivities();
+  };
+}
+
+export async function fetchOwnRecentActivities(
+  uid: string,
+  maxCount = 100
+): Promise<StudentActivityRecord[]> {
+  if (!uid) return [];
+  if (isCnRegion()) {
+    const rawList = await cnApi.fetchOwnActivities(maxCount);
+    return rawList
+      .map((item) => sanitizeStudentActivityRecord(item.id, item))
+      .filter((item): item is StudentActivityRecord => item !== null);
+  }
+  const activitiesQuery = query(
+    collection(db, STUDENT_PROGRESS_COLLECTION, uid, ACTIVITIES_SUBCOLLECTION),
+    orderBy('createdAt', 'desc'),
+    limit(Math.min(150, Math.max(1, maxCount)))
+  );
+  const actSnap = await getDocs(activitiesQuery);
+  const activities: StudentActivityRecord[] = [];
+  actSnap.forEach((docSnap) => {
+    const parsed = sanitizeStudentActivityRecord(docSnap.id, docSnap.data());
+    if (parsed) activities.push(parsed);
+  });
+  return activities;
 }

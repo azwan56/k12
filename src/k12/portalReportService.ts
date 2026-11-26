@@ -1,4 +1,4 @@
-import type { User } from 'firebase/auth';
+import type { AppUser } from '../lib/authTypes';
 import { toBlob } from 'html-to-image';
 import { isValidDiscordWebhookUrl } from '../lib/security';
 import { resolvePortalReportTargets } from './guardianLinkService';
@@ -15,7 +15,7 @@ export interface PortalReportTarget {
 }
 
 export async function resolvePortalReportTarget(
-  user: User,
+  user: AppUser,
   fallbackName: string
 ): Promise<PortalReportTarget | null> {
   const { targets, senderName } = await resolvePortalReportTargets(user, fallbackName);

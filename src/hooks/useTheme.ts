@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getCookieDomain } from '../lib/region';
 
 export function useTheme() {
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -23,14 +24,16 @@ export function useTheme() {
     // Apply changes to DOM, localStorage, and Cookie
     useEffect(() => {
         const root = document.documentElement;
+        const domain = getCookieDomain();
+        const domainAttr = domain ? `; domain=${domain}` : '';
         if (isDarkMode) {
             root.classList.add('dark');
             localStorage.setItem('theme', 'dark');
-            document.cookie = "theme=dark; domain=.vanpower.live; path=/; max-age=31536000";
+            document.cookie = `theme=dark${domainAttr}; path=/; max-age=31536000`;
         } else {
             root.classList.remove('dark');
             localStorage.setItem('theme', 'light');
-            document.cookie = "theme=light; domain=.vanpower.live; path=/; max-age=31536000";
+            document.cookie = `theme=light${domainAttr}; path=/; max-age=31536000`;
         }
     }, [isDarkMode]);
 

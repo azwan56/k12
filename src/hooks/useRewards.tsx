@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { isCnRegion } from '../lib/region';
+import { cnApi } from '../lib/cnApi';
 import { useAuth } from './useAuth';
 import {
   ActivityRewardOutcome,
@@ -44,21 +46,43 @@ export function RewardsProvider({ children }: { children: React.ReactNode }) {
       setRewards(next);
       saveLocalRewards(next);
       if (user) {
-        const userRef = doc(db, 'users', user.uid);
-        setDoc(userRef, { k12Rewards: next }, { merge: true }).catch((err) => {
-          console.error('Failed to sync K12 rewards to Firestore:', err);
-        });
+        if (isCnRegion()) {
+          cnApi.updateRewards(next).catch((err) => {
+            console.error('Failed to sync K12 rewards to CN API:', err);
+          });
+        } else {
+          const userRef = doc(db, 'users', user.uid);
+          setDoc(userRef, { k12Rewards: next }, { merge: true }).catch((err) => {
+            console.error('Failed to sync K12 rewards to Firestore:', err);
+          });
+        }
       }
     },
     [user]
   );
 
-  // Sync with Firestore when user signs in
+  // Sync with Firestore / CN API when user signs in
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       try {
+        if (isCnRegion()) {
+          const state = await cnApi.getUserState();
+          if (cancelled) return;
+          if (state.rewards && Object.keys(state.rewards).length > 0) {
+            const merged = mergeRewards(rewardsRef.current, state.rewards as Partial<RewardsState>);
+            rewardsRef.current = merged;
+            setRewards(merged);
+            saveLocalRewards(merged);
+            if (merged.updatedAt > ((state.rewards as { updatedAt?: number }).updatedAt ?? 0)) {
+              cnApi.updateRewards(merged).catch(() => {});
+            }
+          } else if (rewardsRef.current.xp > 0 || rewardsRef.current.coins > 0) {
+            cnApi.updateRewards(rewardsRef.current).catch(() => {});
+          }
+          return;
+        }
         const userRef = doc(db, 'users', user.uid);
         const snap = await getDoc(userRef);
         if (cancelled) return;

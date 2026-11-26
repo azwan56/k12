@@ -19,13 +19,25 @@ interface Props {
   total: number;
   difficulty: DifficultyLevel;
   language: 'en' | 'zh';
+  liveStatusText?: string;
+  onProgress?: (result: AnswerResultPayload) => void;
   onAnswer: (result: AnswerResultPayload) => void;
   onQuit: () => void;
 }
 
 type CardStatus = 'answering' | 'first_correct' | 'hint_active' | 'second_correct' | 'second_failed';
 
-export default function QuestionScreen({ question, index, total, difficulty, language, onAnswer, onQuit }: Props) {
+export default function QuestionScreen({
+  question,
+  index,
+  total,
+  difficulty,
+  language,
+  liveStatusText,
+  onProgress,
+  onAnswer,
+  onQuit,
+}: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [firstAttempt, setFirstAttempt] = useState<string | null>(null);
   const [secondAttempt, setSecondAttempt] = useState<string | null>(null);
@@ -47,18 +59,35 @@ export default function QuestionScreen({ question, index, total, difficulty, lan
     if (!selected) return;
     if (selected === question.correctAnswer) {
       setStatus('first_correct');
+      onProgress?.({ answer: selected, isCorrect: true, attempts: 1, usedHint: false });
     } else {
       // Wrong on first try -> show hint, hide answer, offer a second chance
       setFirstAttempt(selected);
       setSelected(null);
       setStatus('hint_active');
+      onProgress?.({
+        answer: selected,
+        isCorrect: false,
+        attempts: 1,
+        firstAttemptAnswer: selected,
+        usedHint: true,
+      });
     }
   };
 
   const submitSecond = () => {
     if (!selected) return;
+    const isCorrect = selected === question.correctAnswer;
     setSecondAttempt(selected);
-    setStatus(selected === question.correctAnswer ? 'second_correct' : 'second_failed');
+    setStatus(isCorrect ? 'second_correct' : 'second_failed');
+    onProgress?.({
+      answer: selected,
+      isCorrect,
+      attempts: 2,
+      firstAttemptAnswer: firstAttempt || undefined,
+      secondAttemptAnswer: selected,
+      usedHint: true,
+    });
   };
 
   const proceed = () => {
@@ -89,9 +118,16 @@ export default function QuestionScreen({ question, index, total, difficulty, lan
     <>
       <div className="flex items-center justify-between">
         <BackButton onClick={onQuit} label="退出" />
-        <span className="font-extrabold text-slate-600 mt-2">
-          {index + 1} / {total}
-        </span>
+        <div className="flex items-center gap-2 mt-2">
+          {liveStatusText && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 font-extrabold text-emerald-800">
+              {liveStatusText}
+            </span>
+          )}
+          <span className="font-extrabold text-slate-600">
+            {index + 1} / {total}
+          </span>
+        </div>
       </div>
 
       {/* Progress dots */}

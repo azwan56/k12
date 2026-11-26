@@ -9,6 +9,8 @@ import {
 } from '../types';
 import { db } from '../../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import { isCnRegion } from '../../../lib/region';
+import { cnApi } from '../../../lib/cnApi';
 
 const STORAGE_PREFIX = 'mathgenius_learning_profile_';
 
@@ -48,23 +50,28 @@ export const saveLearningProfile = (profile: StudentLearningProfile): void => {
     console.error('[LearningProfile] Failed to save to localStorage:', err);
   }
 
-  // Asynchronously sync to Firestore if user is authenticated
+  // Asynchronously sync to Firestore or CN API if user is authenticated
   if (profile.studentId && profile.studentId !== 'guest') {
+    const payload = {
+      currentDifficulty: profile.currentDifficulty,
+      adaptiveMode: profile.adaptiveMode,
+      weakCategories: profile.weakCategories,
+      totalQuizzesTaken: profile.totalQuizzesTaken,
+      updatedAt: Date.now()
+    };
     try {
-      const ref = doc(db, 'users', profile.studentId);
-      setDoc(
-        ref,
-        {
-          mathgeniusProfile: {
-            currentDifficulty: profile.currentDifficulty,
-            adaptiveMode: profile.adaptiveMode,
-            weakCategories: profile.weakCategories,
-            totalQuizzesTaken: profile.totalQuizzesTaken,
-            updatedAt: Date.now()
-          }
-        },
-        { merge: true }
-      ).catch(e => console.warn('[LearningProfile] Firestore sync warning:', e));
+      if (isCnRegion()) {
+        cnApi.updateMathGeniusProfile(payload).catch(e =>
+          console.warn('[LearningProfile] CN API sync warning:', e)
+        );
+      } else {
+        const ref = doc(db, 'users', profile.studentId);
+        setDoc(
+          ref,
+          { mathgeniusProfile: payload },
+          { merge: true }
+        ).catch(e => console.warn('[LearningProfile] Firestore sync warning:', e));
+      }
     } catch (e) {
       // Non-blocking
     }

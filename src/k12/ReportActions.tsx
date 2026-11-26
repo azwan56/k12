@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Download, Loader2, Send, Share2, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
+import { isCnRegion, isWeChatBrowser } from '../lib/region';
 import {
   type PortalReportTarget,
   captureReportPngBlob,
@@ -38,24 +39,28 @@ export default function ReportActions({
   const { resolvedName } = useProfile();
 
   const [target, setTarget] = useState<PortalReportTarget | null>(null);
-  const [targetLoading, setTargetLoading] = useState(false);
   const [sendStatus, setSendStatus] = useState<SendStatus>('idle');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const autoSentKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   useEffect(() => {
     setSendStatus('idle');
   }, [sessionKey]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || isCnRegion()) {
       setTarget(null);
-      setTargetLoading(false);
       return;
     }
     let cancelled = false;
-    setTargetLoading(true);
     const fallbackName =
       resolvedName || user.displayName || user.email?.split('@')[0] || 'Student';
     resolvePortalReportTarget(user, fallbackName)
@@ -65,9 +70,6 @@ export default function ReportActions({
       .catch((err) => {
         console.warn('[ReportActions] Target lookup failed:', err);
         if (!cancelled) setTarget(null);
-      })
-      .finally(() => {
-        if (!cancelled) setTargetLoading(false);
       });
     return () => {
       cancelled = true;
@@ -106,11 +108,20 @@ export default function ReportActions({
 
   const safeFilename = `${filePrefix.replace(/[^A-Za-z0-9_-]/g, '-')}-${Date.now()}.png`;
 
+  const openWeChatPreview = (blob: Blob) => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(blob));
+  };
+
   const handleShare = async () => {
     setIsCapturing(true);
     try {
       const blob = await captureReportPngBlob(reportRef.current, backgroundColor);
       if (!blob) return;
+      if (isWeChatBrowser()) {
+        openWeChatPreview(blob);
+        return;
+      }
       await shareOrDownloadPngBlob(
         blob,
         safeFilename,
@@ -126,7 +137,12 @@ export default function ReportActions({
     setIsCapturing(true);
     try {
       const blob = await captureReportPngBlob(reportRef.current, backgroundColor);
-      if (blob) downloadPngBlob(blob, safeFilename);
+      if (!blob) return;
+      if (isWeChatBrowser()) {
+        openWeChatPreview(blob);
+        return;
+      }
+      downloadPngBlob(blob, safeFilename);
     } finally {
       setIsCapturing(false);
     }
@@ -170,12 +186,6 @@ export default function ReportActions({
               </button>
             </>
           )}
-        </p>
-      )}
-
-      {sendStatus === 'idle' && user && !targetLoading && !target && (
-        <p className="mb-3 text-center text-xs font-extrabold text-emerald-700" role="status">
-          ✓ 练习结果已同步至「家长督学看板」，也可分享或保存成绩单图片
         </p>
       )}
 
@@ -224,6 +234,38 @@ export default function ReportActions({
             </>
           )}
         </button>
+      )}
+
+      {previewUrl && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="长按保存成绩单图片"
+          onClick={() => setPreviewUrl(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl border-[3px] border-ink bg-white p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-black text-ink">长按下方图片即可保存或转发给家长</p>
+              <button
+                type="button"
+                onClick={() => setPreviewUrl(null)}
+                aria-label="关闭图片预览"
+                className="p-1.5 rounded-full border-2 border-ink bg-amber-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <img
+              src={previewUrl}
+              alt={`${subjectLabel} 成绩单`}
+              className="w-full max-h-[70vh] object-contain rounded-2xl border-2 border-ink/20"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

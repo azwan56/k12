@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const isCn = process.env.VITE_APP_REGION === 'cn';
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -14,12 +15,22 @@ export default defineConfig(() => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
+      ...(isCn
+        ? {
+            proxy: {
+              '/api': {
+                target: 'http://127.0.0.1:8787',
+                changeOrigin: true,
+              },
+            },
+          }
+        : {}),
     },
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
-            firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+            ...(isCn ? {} : { firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'] }),
             react: ['react', 'react-dom'],
             vendor: ['lucide-react', 'motion']
           }

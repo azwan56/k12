@@ -52,6 +52,61 @@ export interface WordsmithReviewItem {
   isFallback?: boolean;
 }
 
+export interface RecordActivityInput {
+  id?: string;
+  type: ActivityType;
+  subjectId: SubjectId;
+  title: string;
+  grade: GradeLevel;
+  score: number;
+  maxScore: number;
+  accuracyPct?: number;
+  durationSec?: number | null;
+  summary?: string;
+  aiFeedback?: string | null;
+  essayContent?: string | null;
+  difficulty?: string | null;
+  weakPoints?: string[];
+  questionItems?: QuestionReviewItem[];
+  wordItems?: WordsmithReviewItem[];
+  createdAt?: number;
+  /** Client-only lifecycle flag: false for per-question in-progress upserts, true/omitted on completion. */
+  isComplete?: boolean;
+}
+
+export const INCOMPLETE_SUMMARY_PREFIX = '进行中/未完成';
+
+export function isIncompleteActivity(
+  act: Pick<StudentActivityRecord, 'type' | 'summary' | 'maxScore' | 'questionItems' | 'wordItems'>
+): boolean {
+  if (typeof act.summary === 'string' && act.summary.startsWith(INCOMPLETE_SUMMARY_PREFIX)) {
+    return true;
+  }
+  if (act.type === 'practice' || act.type === 'mathgenius' || act.type === 'humanity') {
+    return act.maxScore > 0 && act.questionItems.length > 0 && act.questionItems.length < act.maxScore;
+  }
+  if (act.type === 'wordsmith') {
+    return act.maxScore > 0 && act.wordItems.length > 0 && act.wordItems.length * 5 < act.maxScore;
+  }
+  return false;
+}
+
+export function formatInProgressSummary(params: {
+  answered: number;
+  total: number;
+  correct: number;
+  unit?: 'question' | 'word';
+  maxStarsSoFar?: number;
+}): string {
+  const { answered, total, correct, unit = 'question', maxStarsSoFar } = params;
+  if (unit === 'word') {
+    const cap = maxStarsSoFar ?? answered * 5;
+    return `${INCOMPLETE_SUMMARY_PREFIX}（已造句 ${answered}/${total} 词，获 ${correct}/${cap} 星）`;
+  }
+  const wrong = Math.max(0, answered - correct);
+  return `${INCOMPLETE_SUMMARY_PREFIX}（已答 ${answered}/${total} 题，答对 ${correct} 题，错 ${wrong} 题）`;
+}
+
 export interface StudentActivityRecord {
   id: string;
   studentUid: string;
@@ -334,8 +389,14 @@ export function sanitizeSubjectStats(
 
 export function applyActivityToSubjectStats(
   prev: Partial<Record<SubjectId, SubjectStatSummary>>,
-  activity: Pick<StudentActivityRecord, 'subjectId' | 'accuracyPct' | 'createdAt' | 'title'>
+  activity: Pick<StudentActivityRecord, 'subjectId' | 'accuracyPct' | 'createdAt' | 'title'> & {
+    type?: ActivityType;
+  }
 ): Partial<Record<SubjectId, SubjectStatSummary>> {
+  // Extracurricular 中华历史地理大闯关 (type: 'humanity') stays separate from school Humanities mastery.
+  if (activity.type === 'humanity') {
+    return prev;
+  }
   const existing = prev[activity.subjectId];
   const completedCount = (existing?.completedCount ?? 0) + 1;
   const totalAccuracySum = (existing?.totalAccuracySum ?? 0) + clampNonNegInt(activity.accuracyPct, 0, 100);

@@ -1,7 +1,9 @@
 import { useRef } from 'react';
-import type { User } from 'firebase/auth';
+import type { AppUser } from '../../../lib/authTypes';
+import { isCnRegion } from '../../../lib/region';
 import { Star } from 'lucide-react';
 import { BatchResult, SessionRecord } from '../types';
+import ActivitySyncStatus, { type ActivitySyncState } from '../../../k12/ActivitySyncStatus';
 import ReportActions from '../../../k12/ReportActions';
 import type { ActivityRewardOutcome } from '../../../k12/rewards';
 import RewardBanner from '../../../k12/RewardBanner';
@@ -11,9 +13,11 @@ interface Props {
   results: BatchResult[];
   history: SessionRecord[];
   isCustomMode: boolean;
-  user: User;
+  user: AppUser;
   userName: string;
   rewardOutcome?: ActivityRewardOutcome | null;
+  syncStatus?: ActivitySyncState;
+  onRetrySync?: () => void;
   onRestart: () => void;
 }
 
@@ -24,6 +28,8 @@ export default function BatchSummary({
   user: _user,
   userName,
   rewardOutcome,
+  syncStatus = 'idle',
+  onRetrySync,
   onRestart,
 }: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
@@ -88,11 +94,13 @@ export default function BatchSummary({
         </ul>
 
         <p className="text-center text-xs font-extrabold text-slate-500 mt-5 tracking-widest">
-          WORDSMITH.VANPOWER.LIVE
+          {isCnRegion() ? 'K12.VANPOWER.NET · WORDSMITH' : 'WORDSMITH.VANPOWER.LIVE'}
         </p>
       </div>
 
       <RewardBanner outcome={rewardOutcome ?? null} />
+
+      <ActivitySyncStatus status={syncStatus} onRetry={onRetrySync} />
 
       <button
         type="button"

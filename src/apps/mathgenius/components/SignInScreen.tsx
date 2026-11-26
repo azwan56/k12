@@ -1,5 +1,6 @@
 import { LogIn } from 'lucide-react';
 import { BackLink } from '../../../k12/SubjectPage';
+import { isCnRegion } from '../../../lib/region';
 
 interface Props {
   backHref: string;
@@ -22,7 +23,7 @@ export default function SignInScreen({ backHref, needsSSOSync, onSignIn }: Props
         className="chunky bg-yellow-300 mt-8 w-full py-4 text-xl font-black flex items-center justify-center gap-2"
       >
         <LogIn className="w-6 h-6" aria-hidden="true" />
-        {needsSSOSync ? '同步登录' : '用 Google 登录'}
+        {isCnRegion() ? '用微信登录' : needsSSOSync ? '同步登录' : '用 Google 登录'}
       </button>
     </>
   );

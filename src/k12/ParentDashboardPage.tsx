@@ -4,6 +4,7 @@ import {
   BookOpen,
   Check,
   Clock,
+  Copy,
   Flame,
   LogIn,
   Plus,
@@ -21,6 +22,7 @@ import {
 import { DIFFICULTY_CONFIGS, DifficultyLevel, GRADE_6_CATEGORIES } from '../apps/mathgenius/types';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
+import { isCnRegion, isSyntheticCnEmail } from '../lib/region';
 import {
   type GuardianLink,
   isValidEmailAddress,
@@ -28,18 +30,22 @@ import {
 } from './guardianLinks';
 import {
   addStudentLink,
+  createGuardianInvite,
   fetchParentStudentLinks,
   removeGuardianLink,
 } from './guardianLinkService';
 import { DAILY_GOAL_TARGET, TITLES } from './rewards';
+import { isActivityLikelyAborted } from './dailyMistakes';
+import DailyMistakesPanel from './DailyMistakesPanel';
 import {
   type ActivityType,
   type StudentActivityRecord,
   type StudentProgressSummary,
+  isIncompleteActivity,
 } from './studentProgress';
 import {
   type LinkedStudentProgressResult,
-  fetchLinkedStudentProgress,
+  subscribeLinkedStudentProgress,
 } from './studentProgressService';
 import { BackLink } from './SubjectPage';
 import { THEME, replaceQuery } from './ui';
@@ -52,7 +58,7 @@ const FILTER_TABS: { id: FilterTab; label: string }[] = [
   { id: 'practice', label: '学科练习' },
   { id: 'wordsmith', label: 'Wordsmith' },
   { id: 'mathgenius', label: 'MathGenius' },
-  { id: 'humanity', label: '人文闯关' },
+  { id: 'humanity', label: '中华闯关' },
   { id: 'essay', label: '命题作文' },
 ];
 
@@ -60,7 +66,7 @@ const ACTIVITY_TYPE_BADGE: Record<ActivityType, { label: string; badgeClass: str
   practice: { label: '学科练习', badgeClass: 'bg-sky-100 text-sky-900' },
   wordsmith: { label: 'Wordsmith', badgeClass: 'bg-rose-100 text-rose-900' },
   mathgenius: { label: 'MathGenius', badgeClass: 'bg-indigo-100 text-indigo-900' },
-  humanity: { label: '人文闯关', badgeClass: 'bg-amber-100 text-amber-900' },
+  humanity: { label: '中华闯关', badgeClass: 'bg-amber-100 text-amber-900' },
   essay: { label: '命题作文', badgeClass: 'bg-emerald-100 text-emerald-900' },
 };
 
@@ -111,11 +117,19 @@ function resolveMathDifficultyLabel(level: string): string {
 }
 
 function formatActivityScoreBadge(act: StudentActivityRecord): string {
+  const incomplete = isIncompleteActivity(act);
   if (act.type === 'wordsmith') {
+    if (incomplete && act.maxScore > 0) {
+      const targetWords = Math.max(act.wordItems.length, Math.round(act.maxScore / 5));
+      return `已造句 ${act.wordItems.length}/${targetWords} 词 · ${act.score} 星`;
+    }
     return `${act.score}/${act.maxScore} 星 · ${act.accuracyPct}%`;
   }
   if (act.type === 'essay') {
     return `${act.score} 词（目标 ≥ ${act.maxScore}）`;
+  }
+  if (incomplete) {
+    return `已答 ${act.questionItems.length}/${act.maxScore} 题 · 对 ${act.score}（${act.accuracyPct}%）`;
   }
   return `${act.score}/${act.maxScore} 题 · ${act.accuracyPct}%`;
 }
@@ -136,13 +150,20 @@ export default function ParentDashboardPage({
   const [progress, setProgress] = useState<LinkedStudentProgressResult | null>(null);
   const [progressLoading, setProgressLoading] = useState(false);
   const [progressError, setProgressError] = useState<string | null>(null);
+  const [subVersion, setSubVersion] = useState(0);
 
   const [filter, setFilter] = useState<FilterTab>('all');
+  const [subjectFilter, setSubjectFilter] = useState<'all' | SubjectId>('all');
+  const [onlyIssueSessions, setOnlyIssueSessions] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [studentEmailInput, setStudentEmailInput] = useState('');
   const [addBusy, setAddBusy] = useState(false);
   const [addMessage, setAddMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [inviteInfo, setInviteInfo] = useState<{ code: string; expiresAt: number } | null>(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const cnMode = isCnRegion();
 
   const loadLinks = useCallback(async () => {
     if (!user?.uid) {
@@ -189,46 +210,76 @@ export default function ParentDashboardPage({
     [links, selectedLinkId]
   );
 
-  const loadSelectedProgress = useCallback(async (link: GuardianLink | null) => {
-    if (!link) {
+  useEffect(() => {
+    if (!selectedLink) {
       setProgress(null);
       setProgressError(null);
+      setProgressLoading(false);
       return;
     }
-    if (!link.studentUid) {
+    if (!selectedLink.studentUid) {
       setProgress({ summary: null, activities: [] });
       setProgressError(null);
+      setProgressLoading(false);
       return;
     }
     setProgressLoading(true);
     setProgressError(null);
-    try {
-      const result = await fetchLinkedStudentProgress(link);
-      setProgress(result);
-    } catch (err) {
-      console.warn('[ParentDashboardPage] Failed to load student progress:', err);
-      setProgress(null);
-      setProgressError('读取该学生的学习档案受限或网络异常，请确认学生已完成最新登录同步。');
-    } finally {
-      setProgressLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadSelectedProgress(selectedLink);
-  }, [selectedLink, loadSelectedProgress]);
+    return subscribeLinkedStudentProgress(
+      selectedLink,
+      (result) => {
+        setProgress(result);
+        setProgressLoading(false);
+      },
+      (err) => {
+        console.warn('[ParentDashboardPage] Failed to subscribe student progress:', err);
+        setProgress(null);
+        setProgressError('读取该学生的学习档案受限或网络异常，请确认学生已完成最新登录同步。');
+        setProgressLoading(false);
+      }
+    );
+  }, [selectedLink, subVersion]);
 
   const handleSelectStudent = (link: GuardianLink) => {
     setSelectedLinkId(link.id);
     setFilter('all');
-    replaceQuery(['parent'], { student: link.studentEmail });
+    setSubjectFilter('all');
+    replaceQuery(['parent'], { student: cnMode ? (link.studentUid || link.id) : link.studentEmail });
+  };
+
+  const handleGenerateInvite = async () => {
+    setInviteBusy(true);
+    setAddMessage(null);
+    try {
+      const res = await createGuardianInvite();
+      setInviteInfo(res);
+      setCopiedInvite(false);
+    } catch (err) {
+      setAddMessage({
+        kind: 'err',
+        text: err instanceof Error ? err.message : '生成绑定邀请码失败，请稍后重试。',
+      });
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const handleCopyInviteLink = async (code: string) => {
+    const shareUrl = `${window.location.origin}/#/bind?code=${code}`;
+    try {
+      await navigator.clipboard.writeText(
+        `请打开 Vanpower K12 确认绑定家长督学（6 位绑定码：${code}）：\n${shareUrl}`
+      );
+      setCopiedInvite(true);
+      window.setTimeout(() => setCopiedInvite(false), 2500);
+    } catch {
+      // Clipboard fallback ignored
+    }
   };
 
   const handleRefresh = async () => {
     await loadLinks();
-    if (selectedLink) {
-      await loadSelectedProgress(selectedLink);
-    }
+    setSubVersion((v) => v + 1);
   };
 
   const handleAddStudent = async (e: React.FormEvent) => {
@@ -303,8 +354,23 @@ export default function ParentDashboardPage({
   const summary: StudentProgressSummary | null = progress?.summary ?? null;
   const activities: StudentActivityRecord[] = progress?.activities ?? [];
   const filteredActivities = useMemo(
-    () => (filter === 'all' ? activities : activities.filter((a) => a.type === filter)),
-    [activities, filter]
+    () =>
+      activities.filter((a) => {
+        if (filter !== 'all' && a.type !== filter) return false;
+        if (subjectFilter !== 'all') {
+          if (a.subjectId !== subjectFilter) return false;
+          // Keep school Humanity separated from extracurricular 中华历史地理大闯关
+          if (subjectFilter === 'humanity' && a.type === 'humanity') return false;
+        }
+        if (onlyIssueSessions) {
+          const hasWrongQ = a.questionItems.some((q) => !q.isCorrect);
+          const hasLowWord = a.wordItems.some((w) => !w.isFallback && w.score <= 2);
+          const incomplete = isIncompleteActivity(a);
+          if (!hasWrongQ && !hasLowWord && !incomplete) return false;
+        }
+        return true;
+      }),
+    [activities, filter, subjectFilter, onlyIssueSessions]
   );
 
   const totalCompleted = useMemo(() => {
@@ -334,7 +400,9 @@ export default function ParentDashboardPage({
           </div>
           <h1 className="text-3xl font-black">家长督学看板</h1>
           <p className="font-bold text-slate-700 mt-2 max-w-md mx-auto">
-            请先使用家长或教师的 Google 邮箱登录，即可绑定孩子的学习邮箱，查看各科掌握度、每日打卡、错题明细与作文内容。
+            {cnMode
+              ? '请先使用家长微信登录，生成 6 位绑定码发送给孩子，即可实时查看各科掌握度、每日打卡、错题明细与作文内容。'
+              : '请先使用家长或教师的 Google 邮箱登录，即可绑定孩子的学习邮箱，查看各科掌握度、每日打卡、错题明细与作文内容。'}
           </p>
           <button
             type="button"
@@ -342,7 +410,7 @@ export default function ParentDashboardPage({
             className="chunky bg-yellow-300 px-6 py-3 mt-6 inline-flex items-center gap-2 text-lg font-black"
           >
             <LogIn className="w-5 h-5" aria-hidden="true" />
-            {needsSSOSync ? '同步 Google 登录' : '使用 Google 账号登录'}
+            {cnMode ? '使用微信登录' : needsSSOSync ? '同步 Google 登录' : '使用 Google 账号登录'}
           </button>
         </div>
       </>
@@ -363,7 +431,7 @@ export default function ParentDashboardPage({
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-[3px] border-ink bg-violet-200 hover:bg-violet-300 text-sm font-black transition-colors"
           >
             <Plus className="w-4 h-4" aria-hidden="true" />
-            绑定孩子学习邮箱
+            {cnMode ? '邀请绑定孩子' : '绑定孩子学习邮箱'}
           </button>
           <button
             type="button"
@@ -380,17 +448,71 @@ export default function ParentDashboardPage({
         </div>
       </div>
 
-      <div className="mt-5">
-        <h1 className="text-3xl sm:text-4xl font-black">
-          <span aria-hidden="true">👨‍👩‍👧 </span>家长督学看板
-        </h1>
-        <p className="font-bold text-slate-600 mt-1">
-          查看绑定学生的各科练习记录、每日打卡、错题与造句点评
-        </p>
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-black">
+            <span aria-hidden="true">👨‍👩‍👧 </span>家长督学看板
+          </h1>
+          <p className="font-bold text-slate-600 mt-1">
+            查看绑定学生的各科练习记录、每日打卡、错题与造句点评
+          </p>
+        </div>
+        {selectedLink?.studentUid && !progressError && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border-2 border-emerald-700 bg-emerald-50 text-xs font-black text-emerald-900">
+            <span aria-hidden="true">🟢</span> 实时自动同步
+          </span>
+        )}
       </div>
 
       {/* Add Student Form */}
-      {showAddForm && (
+      {showAddForm && (cnMode ? (
+        <div className="chunky bg-violet-50 p-5 mt-5">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-lg font-black">生成孩子绑定码 / 微信邀请链接</h2>
+            {links.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="p-1 rounded-full hover:bg-violet-200"
+                aria-label="收起表单"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <p className="text-xs font-bold text-slate-600 mb-3">
+            点击生成 6 位数字绑定码（15 分钟有效），发给孩子在「绑定家长督学」页面输入或直接微信打开邀请链接确认即可。
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={inviteBusy}
+              onClick={() => void handleGenerateInvite()}
+              className="px-5 py-2.5 rounded-2xl border-[3px] border-ink bg-yellow-300 hover:bg-yellow-400 font-black disabled:opacity-50"
+            >
+              {inviteBusy ? '生成中…' : inviteInfo ? '重新生成绑定码' : '生成 6 位绑定码'}
+            </button>
+            {inviteInfo && (
+              <>
+                <span className="px-4 py-2 rounded-2xl border-[3px] border-ink bg-white font-black text-xl tracking-[0.2em]">
+                  {inviteInfo.code}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyInviteLink(inviteInfo.code)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl border-[3px] border-ink bg-emerald-300 hover:bg-emerald-400 font-black text-sm"
+                >
+                  {copiedInvite ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copiedInvite ? '已复制微信邀请链接' : '复制微信邀请链接'}
+                </button>
+              </>
+            )}
+          </div>
+          {addMessage && (
+            <p className="mt-2.5 text-sm font-extrabold text-rose-600">{addMessage.text}</p>
+          )}
+        </div>
+      ) : (
         <form onSubmit={handleAddStudent} className="chunky bg-violet-50 p-5 mt-5">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h2 className="text-lg font-black">绑定孩子学习邮箱</h2>
@@ -434,7 +556,7 @@ export default function ParentDashboardPage({
             </p>
           )}
         </form>
-      )}
+      ))}
 
       {linksError && (
         <div className="mt-4 p-4 rounded-2xl border-[3px] border-ink bg-rose-100 text-rose-900 font-bold flex items-center gap-2">
@@ -448,7 +570,9 @@ export default function ParentDashboardPage({
         <div className="mt-6 flex flex-wrap items-center gap-2.5">
           {links.map((link) => {
             const active = selectedLink?.id === link.id;
-            const label = link.studentName || link.studentEmail;
+            const label =
+              link.studentName ||
+              (isSyntheticCnEmail(link.studentEmail) ? '微信同学' : link.studentEmail);
             return (
               <div key={link.id} className="inline-flex items-center gap-1">
                 <button
@@ -496,7 +620,9 @@ export default function ParentDashboardPage({
           </div>
           <h2 className="text-xl font-black">尚未绑定任何学生</h2>
           <p className="font-bold text-slate-600 mt-1">
-            请在上方输入框填写孩子登录 Vanpower K12 使用的邮箱账号完成绑定。
+            {cnMode
+              ? '请点击上方「邀请绑定孩子」生成 6 位绑定码发给孩子确认即可完成绑定。'
+              : '请在上方输入框填写孩子登录 Vanpower K12 使用的邮箱账号完成绑定。'}
           </p>
         </div>
       )}
@@ -528,7 +654,7 @@ export default function ParentDashboardPage({
               <h2 className="text-xl font-black">等待孩子登录授权同步</h2>
               <p className="font-bold text-slate-700 mt-1.5 leading-relaxed">
                 已成功登记学生邮箱 <span className="underline">{selectedLink.studentEmail}</span>。基于隐私安全保护，请让孩子使用该邮箱登录{' '}
-                <span className="font-black">k12.vanpower.live</span>（或完成一轮练习），系统将自动回写授权标识并实时同步过往与后续练习明细。
+                <span className="font-black">{cnMode ? 'k12.vanpower.net' : 'k12.vanpower.live'}</span>（或完成一轮练习），系统将自动回写授权标识并实时同步过往与后续练习明细。
               </p>
             </div>
           </div>
@@ -545,8 +671,8 @@ export default function ParentDashboardPage({
               <div className="flex-1 min-w-0">
                 <h2 className="text-xl font-black">账号已绑定，等待孩子页面同步学习档案</h2>
                 <p className="font-bold text-slate-700 mt-1.5 leading-relaxed">
-                  学生 {selectedLink.studentName || selectedLink.studentEmail} 已完成账号绑定，但尚未同步最新学习快照。请让孩子在设备上刷新或打开一次{' '}
-                  <span className="font-black">k12.vanpower.live</span>
+                  学生 {selectedLink.studentName || (isSyntheticCnEmail(selectedLink.studentEmail) ? '微信同学' : selectedLink.studentEmail)} 已完成账号绑定，但尚未同步最新学习快照。请让孩子在设备上刷新或打开一次{' '}
+                  <span className="font-black">{cnMode ? 'k12.vanpower.net' : 'k12.vanpower.live'}</span>
                   ，即可自动同步历史与后续练习记录。
                 </p>
                 <button
@@ -703,6 +829,13 @@ export default function ParentDashboardPage({
             })()}
           </section>
 
+          {/* 今日错题本与中途退出追踪 */}
+          <DailyMistakesPanel
+            activities={activities}
+            studentName={summary.displayName}
+            showAbortedAlert
+          />
+
           {/* 学科与专项掌握度区块 */}
           <section aria-label="学科与专项掌握度" className="mt-7">
             <h2 className="text-2xl font-black">学科与专项掌握度</h2>
@@ -804,7 +937,7 @@ export default function ParentDashboardPage({
               {/* Humanity */}
               <div className="chunky bg-amber-50 p-4">
                 <h3 className="font-black text-base flex items-center gap-1.5">
-                  <span aria-hidden="true">🏛️</span> 人文大闯关进度
+                  <span aria-hidden="true">🏛️</span> 中华历史地理大闯关（课外）
                 </h3>
                 {summary.humanityProgress ? (
                   <div className="mt-2.5 space-y-2 text-xs font-extrabold">
@@ -827,7 +960,7 @@ export default function ParentDashboardPage({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs font-bold text-slate-500 mt-2.5">暂未开启人文大闯关</p>
+                  <p className="text-xs font-bold text-slate-500 mt-2.5">暂未开启中华历史地理大闯关</p>
                 )}
               </div>
             </div>
@@ -837,9 +970,21 @@ export default function ParentDashboardPage({
           <section aria-label="最近练习明细" className="mt-8">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-2xl font-black">最近练习明细与错题回放</h2>
-              <span className="text-xs font-extrabold text-slate-500">
-                共显示最近 {filteredActivities.length} 条记录
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={onlyIssueSessions}
+                  onClick={() => setOnlyIssueSessions((v) => !v)}
+                  className={`px-3 py-1 rounded-full border-2 border-ink text-xs font-black transition-colors ${
+                    onlyIssueSessions ? 'bg-rose-200 text-rose-950' : 'bg-white hover:bg-rose-50'
+                  }`}
+                >
+                  {onlyIssueSessions ? '✓ 仅看含错题/未完赛' : '只看含错题 / 中途退出'}
+                </button>
+                <span className="text-xs font-extrabold text-slate-500">
+                  共显示最近 {filteredActivities.length} 条记录
+                </span>
+              </div>
             </div>
 
             <div role="group" aria-label="筛选练习类型" className="flex flex-wrap gap-2 mt-3">
@@ -850,12 +995,51 @@ export default function ParentDashboardPage({
                     key={tab.id}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => setFilter(tab.id)}
+                    onClick={() => {
+                      setFilter(tab.id);
+                      if (tab.id === 'humanity') {
+                        setSubjectFilter('all');
+                      }
+                    }}
                     className={`px-3.5 py-1.5 rounded-full border-[3px] border-ink text-xs sm:text-sm font-black transition-colors ${
                       active ? 'bg-yellow-300 shadow-[2px_2px_0_var(--color-ink)]' : 'bg-white hover:bg-yellow-50'
                     }`}
                   >
                     {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div role="group" aria-label="按学科筛选" className="flex flex-wrap gap-1.5 mt-2.5">
+              <button
+                type="button"
+                aria-pressed={subjectFilter === 'all'}
+                onClick={() => setSubjectFilter('all')}
+                className={`px-3 py-1 rounded-full border-2 border-ink text-xs font-black transition-colors ${
+                  subjectFilter === 'all' ? 'bg-ink text-white' : 'bg-white hover:bg-slate-100'
+                }`}
+              >
+                全部学科
+              </button>
+              {SUBJECTS.map((subj) => {
+                const active = subjectFilter === subj.id;
+                return (
+                  <button
+                    key={subj.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      setSubjectFilter((prev) => (prev === subj.id ? 'all' : subj.id));
+                      if (filter === 'humanity') {
+                        setFilter('all');
+                      }
+                    }}
+                    className={`px-3 py-1 rounded-full border-2 border-ink text-xs font-black transition-colors ${
+                      active ? `${THEME[subj.id].solid} shadow-[2px_2px_0_var(--color-ink)]` : 'bg-white hover:bg-yellow-50'
+                    }`}
+                  >
+                    {subj.emoji} {subj.name}
                   </button>
                 );
               })}
@@ -875,6 +1059,8 @@ export default function ParentDashboardPage({
                 {filteredActivities.map((act) => {
                   const typeMeta = ACTIVITY_TYPE_BADGE[act.type];
                   const durationStr = formatDuration(act.durationSec);
+                  const incomplete = isIncompleteActivity(act);
+                  const aborted = incomplete && isActivityLikelyAborted(act, activities);
                   const hasDetails =
                     act.wordItems.length > 0 ||
                     act.questionItems.length > 0 ||
@@ -893,6 +1079,16 @@ export default function ParentDashboardPage({
                               >
                                 {typeMeta.label}
                               </span>
+                              {aborted && (
+                                <span className="text-xs px-2.5 py-0.5 rounded-full border-2 border-ink bg-rose-200 text-rose-950 font-black">
+                                  ⚠️ 中途退出（未完赛）
+                                </span>
+                              )}
+                              {!aborted && incomplete && (
+                                <span className="text-xs px-2.5 py-0.5 rounded-full border-2 border-ink bg-amber-200 text-amber-950 font-black">
+                                  ⏳ 答题进行中
+                                </span>
+                              )}
                               <h3 className="font-black text-base sm:text-lg truncate">{act.title}</h3>
                             </div>
                             <span className="px-3 py-0.5 rounded-full border-2 border-ink bg-yellow-200 text-xs font-black tabular-nums shrink-0">

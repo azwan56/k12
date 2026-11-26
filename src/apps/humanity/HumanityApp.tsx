@@ -1,17 +1,22 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, Lock, Map, RefreshCw, Trophy, Unlock, X } from 'lucide-react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
 import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
+import ActivitySyncStatus, { type ActivitySyncState } from '../../k12/ActivitySyncStatus';
+import { recordLocalDailyMistake } from '../../k12/dailyMistakes';
+import { buildDeterministicActivityId } from '../../k12/pendingActivityQueue';
 import { drawUnseenFromStorage, shuffleOptionsWithAnswer } from '../../k12/questionDedupe';
 import ReportActions from '../../k12/ReportActions';
-import type { ActivityRewardOutcome } from '../../k12/rewards';
+import type { ActivityRewardOutcome, RewardsState } from '../../k12/rewards';
 import RewardBanner from '../../k12/RewardBanner';
 import { BackLink } from '../../k12/SubjectPage';
 import {
   type HumanityProgress,
   type QuestionReviewItem,
+  type RecordActivityInput,
+  formatInProgressSummary,
   loadLocalHumanityLevels,
   saveLocalHumanityLevels,
 } from '../../k12/studentProgress';
@@ -29,9 +34,9 @@ const PASSING_SCORE = 5;
 const TOTAL_LEVELS = 10;
 
 export default function HumanityApp({ grade }: { grade: GradeLevel }) {
-  const { user } = useAuth();
+  const { user, needsSSOSync, signInWithGoogle } = useAuth();
   const { profile, resolvedName, effectiveAvatarId } = useProfile();
-  const { recordPractice } = useRewards();
+  const { rewards, recordPractice } = useRewards();
 
   const [view, setView] = useState<ViewState>('levels');
   const [seasonId, setSeasonId] = useState<SeasonId>(1);
@@ -47,8 +52,42 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
   const [reviewItems, setReviewItems] = useState<ReviewWithExplanation[]>([]);
   const [runSeq, setRunSeq] = useState(0);
   const [lastDurationSec, setLastDurationSec] = useState<number | null>(null);
+  const [syncStatus, setSyncStatus] = useState<ActivitySyncState>('idle');
+  const [liveCount, setLiveCount] = useState(0);
+  const pendingInputRef = useRef<RecordActivityInput | null>(null);
+  const rewardsStateRef = useRef<RewardsState | null>(null);
   const startedAtRef = useRef<number>(Date.now());
+  const sessionIdRef = useRef<string>(buildDeterministicActivityId('humanity', startedAtRef.current));
+  const answersRef = useRef<QuestionReviewItem[]>([]);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  const syncHumanityRound = useCallback(
+    async (input: RecordActivityInput, rewardsState: RewardsState) => {
+      if (!user) {
+        await recordStudentActivity(
+          null,
+          { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+          input
+        );
+        setSyncStatus('guest');
+        return;
+      }
+      setSyncStatus('syncing');
+      const id = await recordStudentActivity(
+        user,
+        { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+        input
+      );
+      setSyncStatus(id ? 'synced' : 'error');
+    },
+    [user, profile, resolvedName, effectiveAvatarId]
+  );
+
+  useEffect(() => {
+    if (view === 'finished' && user && syncStatus === 'guest' && pendingInputRef.current) {
+      void syncHumanityRound(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+    }
+  }, [view, user, syncStatus, syncHumanityRound, rewards]);
 
   const currentSeason = useMemo(
     () => SEASONS.find((s) => s.id === seasonId) ?? SEASONS[0],
@@ -66,6 +105,10 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
       const shuffled = shuffleOptionsWithAnswer(q.options, q.answer);
       return { ...q, options: shuffled.options, answer: shuffled.answer };
     });
+    const now = Date.now();
+    startedAtRef.current = now;
+    sessionIdRef.current = buildDeterministicActivityId('humanity', now);
+    answersRef.current = [];
     setQuestions(drawn);
     setPlayingLevel(level);
     setQuestionIndex(0);
@@ -74,8 +117,11 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
     setRewardOutcome(null);
     setReviewItems([]);
     setLastDurationSec(null);
+    setSyncStatus('idle');
+    setLiveCount(0);
+    pendingInputRef.current = null;
+    rewardsStateRef.current = null;
     setRunSeq((n) => n + 1);
-    startedAtRef.current = Date.now();
     setView('playing');
   };
 
@@ -88,17 +134,65 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
     if (isCorrect) {
       setScore((s) => s + 1);
     }
+    const levelTitle = currentSeason.levels[playingLevel - 1] || currentSeason.title;
+    const reviewItem: QuestionReviewItem = {
+      question: currentQuestion.question,
+      userAnswer: currentQuestion.options[optIdx] ?? '',
+      correctAnswer: currentQuestion.options[currentQuestion.answer] ?? '',
+      isCorrect,
+      category: levelTitle,
+    };
+    const nextAnswers = [...answersRef.current, reviewItem];
+    answersRef.current = nextAnswers;
     setReviewItems((prev) => [
       ...prev,
       {
-        question: currentQuestion.question,
-        userAnswer: currentQuestion.options[optIdx] ?? '',
-        correctAnswer: currentQuestion.options[currentQuestion.answer] ?? '',
-        isCorrect,
-        category: currentSeason.levels[playingLevel - 1] || currentSeason.title,
+        ...reviewItem,
         explanation: currentQuestion.explanation,
       },
     ]);
+
+    const title = `中华历史地理大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`;
+    if (!isCorrect) {
+      recordLocalDailyMistake(user?.uid ?? null, {
+        activityId: sessionIdRef.current,
+        activityType: 'humanity',
+        subjectId: 'humanity',
+        activityTitle: title,
+        grade,
+        isIncompleteSession: true,
+        category: levelTitle,
+        question: reviewItem.question,
+        userAnswer: reviewItem.userAnswer,
+        correctAnswer: reviewItem.correctAnswer,
+      });
+    }
+
+    const nextScore = nextAnswers.filter((a) => a.isCorrect).length;
+    setLiveCount(nextAnswers.length);
+    void recordStudentActivity(
+      user,
+      { profile, resolvedName, effectiveAvatarId, rewards },
+      {
+        id: sessionIdRef.current,
+        type: 'humanity',
+        subjectId: 'humanity',
+        title,
+        grade,
+        score: nextScore,
+        maxScore: QUESTIONS_PER_ROUND,
+        accuracyPct: Math.round((nextScore / nextAnswers.length) * 100),
+        durationSec: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        summary: formatInProgressSummary({
+          answered: nextAnswers.length,
+          total: QUESTIONS_PER_ROUND,
+          correct: nextScore,
+        }),
+        questionItems: nextAnswers,
+        createdAt: startedAtRef.current,
+        isComplete: false,
+      }
+    );
   };
 
   const handleNext = () => {
@@ -110,6 +204,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
     const outcome = recordPractice(score, QUESTIONS_PER_ROUND);
     setRewardOutcome(outcome);
+    rewardsStateRef.current = outcome.nextState;
     const durationSec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
     setLastDurationSec(durationSec);
 
@@ -123,30 +218,27 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
       saveLocalHumanityLevels(nextMap, user?.uid);
     }
 
-    if (user) {
-      const levelTitle = currentSeason.levels[playingLevel - 1] || `第 ${playingLevel} 关`;
-      const cleanedReview: QuestionReviewItem[] = reviewItems.map(
-        ({ explanation: _explanation, ...rest }) => rest
-      );
-      void recordStudentActivity(
-        user,
-        { profile, resolvedName, effectiveAvatarId, rewards: outcome.nextState },
-        {
-          type: 'humanity',
-          subjectId: 'humanity',
-          title: `人文大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`,
-          grade,
-          score,
-          maxScore: QUESTIONS_PER_ROUND,
-          accuracyPct: Math.round((score / QUESTIONS_PER_ROUND) * 100),
-          durationSec,
-          summary: `${currentSeason.title} 第${playingLevel}关，答对 ${score}/${QUESTIONS_PER_ROUND} 题${score >= PASSING_SCORE ? '（通关）' : ''}`,
-          questionItems: cleanedReview,
-        }
-      ).catch((err) => {
-        console.warn('[HumanityApp] Failed to record activity:', err);
-      });
-    }
+    const levelTitle = currentSeason.levels[playingLevel - 1] || `第 ${playingLevel} 关`;
+    const cleanedReview: QuestionReviewItem[] = reviewItems.map(
+      ({ explanation: _explanation, ...rest }) => rest
+    );
+    const input: RecordActivityInput = {
+      id: sessionIdRef.current,
+      type: 'humanity',
+      subjectId: 'humanity',
+      title: `中华历史地理大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`,
+      grade,
+      score,
+      maxScore: QUESTIONS_PER_ROUND,
+      accuracyPct: Math.round((score / QUESTIONS_PER_ROUND) * 100),
+      durationSec,
+      summary: `${currentSeason.title} 第${playingLevel}关，答对 ${score}/${QUESTIONS_PER_ROUND} 题${score >= PASSING_SCORE ? '（通关）' : ''}`,
+      questionItems: cleanedReview,
+      createdAt: startedAtRef.current,
+      isComplete: true,
+    };
+    pendingInputRef.current = input;
+    void syncHumanityRound(input, outcome.nextState);
 
     setView('finished');
   };
@@ -156,11 +248,18 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
     const isCorrect = selectedOption === currentQuestion.answer;
     return (
       <>
-        <div className="flex items-center justify-between">
-          <BackLink href="#/s/humanity" />
-          <span className="font-extrabold text-slate-600 mt-2">
-            第 {seasonId} 季 · 第 {playingLevel} 关（{questionIndex + 1}/{QUESTIONS_PER_ROUND}）
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <BackLink href="#/" label="返回首页" />
+          <div className="flex items-center gap-2 mt-2">
+            {liveCount > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 font-extrabold text-emerald-800">
+                ☁️ 已实时记录 {liveCount} 题
+              </span>
+            )}
+            <span className="font-extrabold text-slate-600">
+              第 {seasonId} 季 · 第 {playingLevel} 关（{questionIndex + 1}/{QUESTIONS_PER_ROUND}）
+            </span>
+          </div>
         </div>
 
         <div className="flex gap-2 mt-4" aria-hidden="true">
@@ -253,7 +352,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
     const studentName = resolvedName || user?.displayName || '同学';
     return (
       <>
-        <BackLink href="#/s/humanity" />
+        <BackLink href="#/" label="返回首页" />
 
         {/* Screenshot-ready Report Card */}
         <div ref={reportRef} className="mt-6 bg-white rounded-3xl border-[3px] border-ink p-6">
@@ -325,6 +424,17 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
         <RewardBanner outcome={rewardOutcome} />
 
+        <ActivitySyncStatus
+          status={syncStatus}
+          needsSSOSync={needsSSOSync}
+          onSignIn={() => void signInWithGoogle()}
+          onRetry={() => {
+            if (pendingInputRef.current) {
+              void syncHumanityRound(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+            }
+          }}
+        />
+
         <div className="grid sm:grid-cols-2 gap-4 mt-6">
           <button
             type="button"
@@ -354,7 +464,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
         <ReportActions
           reportRef={reportRef}
-          subjectLabel={`人文大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`}
+          subjectLabel={`中华历史地理大闯关 · 第${seasonId}季 第${playingLevel}关 ${levelTitle}`}
           scoreSummary={`${score}/${QUESTIONS_PER_ROUND} 题（${accuracyPct}%）`}
           filePrefix="K12-Humanity"
           sessionKey={`humanity-s${seasonId}-l${playingLevel}-${runSeq}`}
@@ -365,7 +475,7 @@ export default function HumanityApp({ grade }: { grade: GradeLevel }) {
 
   return (
     <>
-      <BackLink href="#/s/humanity" />
+      <BackLink href="#/" label="返回首页" />
 
       <div className="chunky bg-amber-100 p-6 mt-6">
         <div className="flex items-center gap-3">

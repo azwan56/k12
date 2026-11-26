@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Check, Gift, Shield, Flame } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ArrowRight, BookX, Check, Gift, Shield, Flame } from 'lucide-react';
 import { SUBJECTS, GradeLevel, gradeLabel } from '../data/k12Subjects';
+import { useAuth } from '../hooks/useAuth';
 import { useRewards } from '../hooks/useRewards';
-import { DAILY_GOAL_TARGET, DailyTaskKey, countCompletedDailyTasks } from './rewards';
+import { loadLocalDailyMistakes } from './dailyMistakes';
+import { DAILY_GOAL_TARGET, DailyTaskKey, countCompletedDailyTasks, getLocalDateStr } from './rewards';
 import { THEME } from './ui';
 
 const DAILY_QUESTS: { key: DailyTaskKey; label: string; hint: string }[] = [
@@ -12,8 +14,14 @@ const DAILY_QUESTS: { key: DailyTaskKey; label: string; hint: string }[] = [
 ];
 
 export default function HomePage({ grade }: { grade: GradeLevel }) {
+  const { user } = useAuth();
   const { rewards, requestRedemption } = useRewards();
   const [redeemNotice, setRedeemNotice] = useState<string | null>(null);
+  const todayLocalMistakeCount = useMemo(() => {
+    const todayKey = getLocalDateStr();
+    const list = loadLocalDailyMistakes(user?.uid ?? null, todayKey);
+    return new Set(list.map((m) => m.key)).size;
+  }, [user?.uid]);
 
   const completedCount = countCompletedDailyTasks(rewards.daily);
   const progressPct = Math.min(100, Math.round((completedCount / DAILY_GOAL_TARGET) * 100));
@@ -110,6 +118,30 @@ export default function HomePage({ grade }: { grade: GradeLevel }) {
         </ul>
       </section>
 
+      {/* 今日错题本入口 */}
+      <a href="#/mistakes" className="chunky bg-rose-50 p-4 mt-4 flex items-center gap-3.5">
+        <span
+          className="bg-rose-200 w-12 h-12 shrink-0 rounded-2xl border-[3px] border-ink grid place-items-center"
+          aria-hidden="true"
+        >
+          <BookX className="w-6 h-6 text-rose-900" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-lg font-black">今日错题本</span>
+            {todayLocalMistakeCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full border-2 border-ink bg-rose-200 text-[11px] font-black text-rose-950">
+                今日 {todayLocalMistakeCount} 题待订正
+              </span>
+            )}
+          </span>
+          <span className="block text-xs font-bold text-slate-600">
+            系统自动收集当天所有做错的题目，方便随时复盘巩固
+          </span>
+        </span>
+        <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+      </a>
+
       {/* 科目卡片 */}
       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-6">
         {SUBJECTS.map((s, i) => (
@@ -132,6 +164,29 @@ export default function HomePage({ grade }: { grade: GradeLevel }) {
           </li>
         ))}
       </ul>
+
+      {/* 课外拓展挑战（与校内世界人文学科独立计分） */}
+      <section aria-label="课外拓展挑战" className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+          <h2 className="text-xl font-black">课外拓展挑战</h2>
+          <span className="text-xs font-extrabold text-slate-500">独立拓展模块 · 与校内学科分开统计</span>
+        </div>
+        <a href="#/adventure" className="chunky bg-amber-50 p-5 flex items-center gap-4">
+          <span
+            className="bg-amber-300 w-14 h-14 shrink-0 rounded-2xl border-[3px] border-ink grid place-items-center text-2xl"
+            aria-hidden="true"
+          >
+            🏛️
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xl font-black">中华历史地理大闯关</span>
+            <span className="block text-sm font-bold text-amber-900">
+              三季 30 关 · 300 题中华文史地理趣味闯关（独立课外模块）
+            </span>
+          </span>
+          <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+        </a>
+      </section>
 
       {/* 心愿兑换商店 */}
       {rewards.wishes.length > 0 && (

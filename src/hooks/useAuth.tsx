@@ -1,69 +1,121 @@
-import { useState, useEffect, createContext, useContext } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { isAllowedVanpowerRedirectUrl } from '../lib/security';
+import { getAppRegion, getCookieDomain, isCnRegion, type AppRegion } from '../lib/region';
+import type { AppUser } from '../lib/authTypes';
+import { cnApi } from '../lib/cnApi';
 import Cookies from 'js-cookie';
 
+export type { AppUser };
+
 interface AuthContextType {
-    user: User | null;
+    region: AppRegion;
+    user: AppUser | null;
     loading: boolean;
     needsSSOSync: boolean;
+    loginModalOpen: boolean;
+    openLoginModal: () => void;
+    closeLoginModal: () => void;
+    refreshSession: () => Promise<void>;
     signInWithGoogle: () => Promise<void>;
     logout: () => Promise<void>;
     generateCustomTokenAndRedirect: (url: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
+    region: 'global',
     user: null,
     loading: true,
     needsSSOSync: false,
+    loginModalOpen: false,
+    openLoginModal: () => { },
+    closeLoginModal: () => { },
+    refreshSession: async () => { },
     signInWithGoogle: async () => { },
     logout: async () => { },
     generateCustomTokenAndRedirect: async () => { },
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [user, setUser] = useState<User | null>(null);
+    const region = getAppRegion();
+    const cnMode = isCnRegion();
+    const [user, setUser] = useState<AppUser | null>(null);
     const [loading, setLoading] = useState(true);
     const [needsSSOSync, setNeedsSSOSync] = useState(false);
+    const [loginModalOpen, setLoginModalOpen] = useState(false);
+
+    const refreshSession = useCallback(async () => {
+        if (!cnMode) return;
+        try {
+            const res = await cnApi.getMe();
+            setUser(res.user);
+        } catch (err) {
+            console.warn('[useAuth:cn] Failed to fetch session:', err);
+            setUser(null);
+        } finally {
+            setLoading(false);
+        }
+    }, [cnMode]);
 
     useEffect(() => {
+        if (cnMode) {
+            void refreshSession();
+            return;
+        }
+
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
-                // User is signed in, sync root domain cookie
-                const domain = window.location.hostname.includes('vanpower.live') ? '.vanpower.live' : window.location.hostname;
+                const domain = getCookieDomain();
                 Cookies.set('vp_session_token', 'true', {
                     domain: domain,
                     path: '/',
                     secure: window.location.protocol === 'https:',
                     sameSite: 'lax',
-                    expires: 7 // 7 days
+                    expires: 7
                 });
                 sessionStorage.removeItem('vp_sso_attempted');
+                setUser({
+                    uid: currentUser.uid,
+                    displayName: currentUser.displayName,
+                    email: currentUser.email,
+                    photoURL: currentUser.photoURL,
+                    provider: 'google',
+                    getIdToken: () => currentUser.getIdToken(),
+                });
+                setNeedsSSOSync(false);
             } else {
                 const sessionToken = Cookies.get('vp_session_token');
                 const ssoAttempted = sessionStorage.getItem('vp_sso_attempted');
 
                 if (sessionToken && !ssoAttempted) {
-                    // We believe they are logged in on the root domain, but not locally.
-                    // Instead of a jarring redirect, flag that they need to sync their session.
                     setNeedsSSOSync(true);
                     setLoading(false);
                     return;
                 }
 
-                // Clear cookie if no SSO sync is needed
-                const domain = window.location.hostname.includes('vanpower.live') ? '.vanpower.live' : window.location.hostname;
+                const domain = getCookieDomain();
                 Cookies.remove('vp_session_token', { domain: domain, path: '/' });
+                setUser(null);
             }
-            setUser(currentUser);
-            if (currentUser) setNeedsSSOSync(false);
             setLoading(false);
         });
         return unsubscribe;
+    }, [cnMode, refreshSession]);
+
+    const openLoginModal = useCallback(() => {
+        setLoginModalOpen(true);
     }, []);
 
-    const signInWithGoogle = async () => {
+    const closeLoginModal = useCallback(() => {
+        setLoginModalOpen(false);
+    }, []);
+
+    const signInWithGoogle = useCallback(async () => {
+        if (cnMode) {
+            setLoginModalOpen(true);
+            return;
+        }
         try {
             googleProvider.setCustomParameters({
                 prompt: 'select_account'
@@ -72,24 +124,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (error) {
             console.error("Error signing in with Google:", error);
         }
-    };
+    }, [cnMode]);
 
-    const logout = async () => {
+    const logout = useCallback(async () => {
+        if (cnMode) {
+            try {
+                await cnApi.logout();
+            } catch (error) {
+                console.error("Error signing out (CN):", error);
+            } finally {
+                setUser(null);
+            }
+            return;
+        }
         try {
-            const domain = window.location.hostname.includes('vanpower.live') ? '.vanpower.live' : window.location.hostname;
+            const domain = getCookieDomain();
             Cookies.remove('vp_session_token', { domain: domain, path: '/' });
             await signOut(auth);
         } catch (error) {
             console.error("Error signing out:", error);
         }
-    };
+    }, [cnMode]);
 
-    const generateCustomTokenAndRedirect = async (destinationUrl: string) => {
+    const generateCustomTokenAndRedirect = useCallback(async (destinationUrl: string) => {
+        if (cnMode) {
+            window.location.href = destinationUrl;
+            return;
+        }
         if (!isAllowedVanpowerRedirectUrl(destinationUrl)) {
             console.error("Blocked untrusted redirect URL in generateCustomTokenAndRedirect:", destinationUrl);
             return;
         }
-        if (!user) {
+        if (!user || !user.getIdToken) {
             window.location.href = destinationUrl;
             return;
         }
@@ -116,10 +182,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Failed to generate custom token, redirecting normally", error);
         }
         window.location.href = destinationUrl;
-    };
+    }, [cnMode, user]);
 
     return (
-        <AuthContext.Provider value={{ user, loading, needsSSOSync, signInWithGoogle, logout, generateCustomTokenAndRedirect }}>
+        <AuthContext.Provider value={{
+            region,
+            user,
+            loading,
+            needsSSOSync,
+            loginModalOpen,
+            openLoginModal,
+            closeLoginModal,
+            refreshSession,
+            signInWithGoogle,
+            logout,
+            generateCustomTokenAndRedirect
+        }}>
             {children}
         </AuthContext.Provider>
     );

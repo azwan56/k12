@@ -19,9 +19,9 @@ export function validateSentenceSubmission(
     return { ok: false, reason: '请先写一个包含目标单词的句子。' };
   }
 
-  const tokens = sentence.match(ENGLISH_WORD_RE) ?? [];
-  const targetTokens = new Set(
-    (targetWord.toLowerCase().match(ENGLISH_WORD_RE) ?? []).filter(Boolean)
+  const tokens: string[] = sentence.match(ENGLISH_WORD_RE) ?? [];
+  const targetTokens = new Set<string>(
+    ((targetWord.toLowerCase().match(ENGLISH_WORD_RE) ?? []) as string[]).filter(Boolean)
   );
   const nonTargetTokens = tokens.filter((t) => !targetTokens.has(t.toLowerCase()));
 

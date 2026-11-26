@@ -1,5 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../../lib/firebase";
+import { isCnRegion } from "../../../lib/region";
+import { cnApi } from "../../../lib/cnApi";
 import { drawUnseenFromStorage } from "../../../k12/questionDedupe";
 import { WordChallenge, EvaluationResult } from "../types";
 import { createEvaluationFallback, normalizeEvaluationResult } from "../wordsmithRules";
@@ -640,10 +642,17 @@ export const createCustomBatch = async (words: string[]): Promise<WordChallenge[
   let remoteByLower = new Map<string, WordChallenge>();
   if (missingWords.length > 0) {
     try {
-      const generateBatch = httpsCallable(functions, 'generateWordsmithBatch', { timeout: 60000 });
-      const result = (await generateBatch({ words: missingWords })) as { data: WordChallenge[] };
-      if (Array.isArray(result.data)) {
-        remoteByLower = new Map(result.data.map((item) => [item.word.toLowerCase(), item]));
+      let items: WordChallenge[] | undefined;
+      if (isCnRegion()) {
+        const res = await cnApi.generateWordsmithBatch(missingWords);
+        items = res.data;
+      } else {
+        const generateBatch = httpsCallable(functions, 'generateWordsmithBatch', { timeout: 60000 });
+        const result = (await generateBatch({ words: missingWords })) as { data: WordChallenge[] };
+        items = result.data;
+      }
+      if (Array.isArray(items)) {
+        remoteByLower = new Map(items.map((item) => [item.word.toLowerCase(), item]));
       }
     } catch (error: any) {
       console.error("Custom batch generation failed", error);
@@ -666,6 +675,10 @@ export const createCustomBatch = async (words: string[]): Promise<WordChallenge[
 
 export const evaluateSentence = async (word: string, sentence: string): Promise<EvaluationResult> => {
   try {
+    if (isCnRegion()) {
+      const res = await cnApi.evaluateWordsmithSentence(word, sentence);
+      return normalizeEvaluationResult(res.data);
+    }
     const evaluate = httpsCallable(functions, 'evaluateWordsmithSentence', { timeout: 60000 });
     const result = await evaluate({ word, sentence }) as { data: unknown };
     return normalizeEvaluationResult(result.data);

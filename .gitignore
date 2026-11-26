@@ -1,7 +1,11 @@
 node_modules/
 functions/node_modules/
+server/node_modules/
+server/dist/
+server/data/
 build/
 dist/
+dist-cn/
 coverage/
 .firebase/
 .DS_Store
@@ -10,3 +14,4 @@ firebase-debug.log
 firebase-debug.*.log
 .env*
 !.env.example
+!deploy/cn/.env.cn.example

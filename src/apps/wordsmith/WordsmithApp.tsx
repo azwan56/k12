@@ -1,12 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogIn } from 'lucide-react';
 import type { GradeLevel } from '../../data/k12Subjects';
 import { useAuth } from '../../hooks/useAuth';
 import { useProfile } from '../../hooks/useProfile';
 import { useRewards } from '../../hooks/useRewards';
-import type { ActivityRewardOutcome } from '../../k12/rewards';
-import type { WordsmithReviewItem } from '../../k12/studentProgress';
+import ActivitySyncStatus, { type ActivitySyncState } from '../../k12/ActivitySyncStatus';
+import { recordLocalDailyMistake } from '../../k12/dailyMistakes';
+import type { ActivityRewardOutcome, RewardsState } from '../../k12/rewards';
+import {
+  type RecordActivityInput,
+  type WordsmithReviewItem,
+  formatInProgressSummary,
+} from '../../k12/studentProgress';
 import { recordStudentActivity } from '../../k12/studentProgressService';
+import { isCnRegion } from '../../lib/region';
 import { BackLink } from '../../k12/SubjectPage';
 import StartScreen from './components/StartScreen';
 import CustomWordInput from './components/CustomWordInput';
@@ -42,8 +49,31 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   const [currentEvaluation, setCurrentEvaluation] = useState<EvaluationResult | null>(null);
   const [currentSentence, setCurrentSentence] = useState('');
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
+  const [syncStatus, setSyncStatus] = useState<ActivitySyncState>('idle');
   const { rewards, recordWordsmith } = useRewards();
   const batchStartRef = useRef(Date.now());
+  const sessionRawIdRef = useRef(String(batchStartRef.current));
+  const sessionIdRef = useRef(`ws_${sessionRawIdRef.current}`);
+  const batchResultsRef = useRef<BatchResult[]>([]);
+  const lastActivityInputRef = useRef<RecordActivityInput | null>(null);
+  const lastRewardsRef = useRef<RewardsState | null>(null);
+
+  const syncWordsmithBatch = useCallback(
+    async (input: RecordActivityInput, rewardsState: RewardsState) => {
+      if (!user) {
+        setSyncStatus('guest');
+        return;
+      }
+      setSyncStatus('syncing');
+      const id = await recordStudentActivity(
+        user,
+        { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+        input
+      );
+      setSyncStatus(id ? 'synced' : 'error');
+    },
+    [user, profile, resolvedName, effectiveAvatarId]
+  );
 
   // Load this user's history on login / user change
   useEffect(() => {
@@ -60,10 +90,18 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   }, [appState, currentIndex, currentEvaluation]);
 
   const resetBatch = () => {
+    const now = Date.now();
+    batchStartRef.current = now;
+    sessionRawIdRef.current = String(now);
+    sessionIdRef.current = `ws_${now}`;
+    batchResultsRef.current = [];
     setBatchResults([]);
     setCurrentIndex(0);
     setCurrentEvaluation(null);
     setCurrentSentence('');
+    setSyncStatus('idle');
+    lastActivityInputRef.current = null;
+    lastRewardsRef.current = null;
   };
 
   const goToMenu = () => {
@@ -74,14 +112,10 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
   };
 
   const quitBatch = () => {
-    if (batchResults.length === 0 || window.confirm('退出本组？进度不会保存。')) goToMenu();
-  };
-
-  useEffect(() => {
-    if (wordBatch.length > 0) {
-      batchStartRef.current = Date.now();
+    if (batchResults.length === 0 || window.confirm('确定退出本组吗？已完成的造句会自动记录。')) {
+      goToMenu();
     }
-  }, [wordBatch]);
+  };
 
   const startRandomBatch = async () => {
     setIsLoading(true);
@@ -129,14 +163,74 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
       const result = await evaluateSentence(currentWord.word, sentence);
       setCurrentEvaluation(result);
       const entry: BatchResult = { wordChallenge: currentWord, userSentence: sentence, evaluation: result };
-      setBatchResults((prev) => {
-        if (prev.length > currentIndex) {
-          const next = [...prev];
-          next[currentIndex] = entry;
-          return next;
-        }
-        return [...prev, entry];
-      });
+      const prev = batchResultsRef.current;
+      const nextResults =
+        prev.length > currentIndex
+          ? prev.map((item, idx) => (idx === currentIndex ? entry : item))
+          : [...prev, entry];
+      batchResultsRef.current = nextResults;
+      setBatchResults(nextResults);
+
+      const title = isCustomMode ? 'Wordsmith · 自定义词单造句' : 'Wordsmith · 随机词汇造句';
+      if (!result.isFallback && result.score <= 2) {
+        recordLocalDailyMistake(user?.uid ?? null, {
+          activityId: sessionIdRef.current,
+          activityType: 'wordsmith',
+          subjectId: 'english',
+          activityTitle: title,
+          grade: profile.grade,
+          isIncompleteSession: true,
+          category: currentWord.partOfSpeech ? `Wordsmith · ${currentWord.partOfSpeech}` : 'Wordsmith 造句',
+          question: `Wordsmith 造句词：${currentWord.word}`,
+          userAnswer: sentence,
+          correctAnswer: result.correction || '请结合老师点评重新造句',
+          kind: 'wordsmith',
+          wordScore: result.score,
+          wordFeedback: result.feedback,
+          wordCorrection: result.correction ?? null,
+        });
+      }
+
+      if (user) {
+        const wordItems: WordsmithReviewItem[] = nextResults.map((r) => ({
+          word: r.wordChallenge.word,
+          partOfSpeech: r.wordChallenge.partOfSpeech,
+          userSentence: r.userSentence,
+          score: r.evaluation.score,
+          feedback: r.evaluation.feedback,
+          correction: r.evaluation.correction ?? null,
+          isFallback: Boolean(r.evaluation.isFallback),
+        }));
+        const scoredResults = nextResults.filter((r) => !r.evaluation.isFallback);
+        const totalStarsSoFar = scoredResults.reduce((acc, r) => acc + r.evaluation.score, 0);
+        const maxStarsSoFar = nextResults.length * 5;
+        const totalTargetWords = wordBatch.length || DEFAULT_BATCH_SIZE;
+        void recordStudentActivity(
+          user,
+          { profile, resolvedName, effectiveAvatarId, rewards },
+          {
+            id: sessionIdRef.current,
+            type: 'wordsmith',
+            subjectId: 'english',
+            title,
+            grade: profile.grade,
+            score: totalStarsSoFar,
+            maxScore: totalTargetWords * 5,
+            accuracyPct: maxStarsSoFar > 0 ? Math.round((totalStarsSoFar / maxStarsSoFar) * 100) : 0,
+            durationSec: Math.max(1, Math.round((Date.now() - batchStartRef.current) / 1000)),
+            summary: formatInProgressSummary({
+              answered: nextResults.length,
+              total: totalTargetWords,
+              correct: totalStarsSoFar,
+              unit: 'word',
+              maxStarsSoFar,
+            }),
+            wordItems,
+            createdAt: batchStartRef.current,
+            isComplete: false,
+          }
+        );
+      }
     } catch (error) {
       console.error('Failed to evaluate', error);
     } finally {
@@ -158,25 +252,24 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
       setCurrentEvaluation(null);
       setCurrentSentence('');
     } else {
-      let sessionRecordId: string | null = null;
+      const finalResults = batchResultsRef.current.length > 0 ? batchResultsRef.current : batchResults;
       if (user) {
         const newSession: SessionRecord = {
-          id: Date.now().toString(),
+          id: sessionRawIdRef.current,
           userId: user.uid,
-          timestamp: Date.now(),
+          timestamp: batchStartRef.current,
           mode: isCustomMode ? 'custom' : 'random',
-          results: batchResults
+          results: finalResults
         };
-        sessionRecordId = newSession.id;
         setHistory(saveSession(newSession));
       }
-      const scoredResults = batchResults.filter((r) => !r.evaluation.isFallback);
+      const scoredResults = finalResults.filter((r) => !r.evaluation.isFallback);
       const totalStars = scoredResults.reduce((acc, r) => acc + r.evaluation.score, 0);
       const outcome = scoredResults.length > 0 ? recordWordsmith(totalStars) : null;
       setRewardOutcome(outcome);
 
       if (user) {
-        const wordItems: WordsmithReviewItem[] = batchResults.map((r) => ({
+        const wordItems: WordsmithReviewItem[] = finalResults.map((r) => ({
           word: r.wordChallenge.word,
           partOfSpeech: r.wordChallenge.partOfSpeech,
           userSentence: r.userSentence,
@@ -185,33 +278,28 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
           correction: r.evaluation.correction ?? null,
           isFallback: Boolean(r.evaluation.isFallback),
         }));
-        const maxStars = batchResults.length * 5;
+        const maxStars = finalResults.length * 5;
         const accuracyPct = maxStars > 0 ? Math.round((totalStars / maxStars) * 100) : 0;
         const durationSec = Math.max(1, Math.round((Date.now() - batchStartRef.current) / 1000));
-        void recordStudentActivity(
-          user,
-          {
-            profile,
-            resolvedName,
-            effectiveAvatarId,
-            rewards: outcome ? outcome.nextState : rewards,
-          },
-          {
-            id: sessionRecordId ? `ws_${sessionRecordId}` : undefined,
-            type: 'wordsmith',
-            subjectId: 'english',
-            title: isCustomMode ? 'Wordsmith · 自定义词单造句' : 'Wordsmith · 随机词汇造句',
-            grade: profile.grade,
-            score: totalStars,
-            maxScore: maxStars,
-            accuracyPct,
-            durationSec,
-            summary: `完成 ${batchResults.length} 个单词造句，获 ${totalStars}/${maxStars} 星`,
-            wordItems,
-          }
-        ).catch((err) => {
-          console.warn('[WordsmithApp] Failed to record activity:', err);
-        });
+        const nextRewards = outcome ? outcome.nextState : rewards;
+        const input: RecordActivityInput = {
+          id: sessionIdRef.current,
+          type: 'wordsmith',
+          subjectId: 'english',
+          title: isCustomMode ? 'Wordsmith · 自定义词单造句' : 'Wordsmith · 随机词汇造句',
+          grade: profile.grade,
+          score: totalStars,
+          maxScore: maxStars,
+          accuracyPct,
+          durationSec,
+          summary: `完成 ${finalResults.length} 个单词造句，获 ${totalStars}/${maxStars} 星`,
+          wordItems,
+          createdAt: batchStartRef.current,
+          isComplete: true,
+        };
+        lastActivityInputRef.current = input;
+        lastRewardsRef.current = nextRewards;
+        void syncWordsmithBatch(input, nextRewards);
       }
 
       setAppState('summary');
@@ -253,7 +341,7 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
           onClick={() => signInWithGoogle()}
           className="chunky bg-yellow-300 w-full mt-6 py-4 text-xl font-black flex items-center justify-center gap-3"
         >
-          <LogIn className="w-6 h-6" aria-hidden="true" /> 用 Google 登录
+          <LogIn className="w-6 h-6" aria-hidden="true" /> {isCnRegion() ? '用微信登录' : '用 Google 登录'}
         </button>
       </>
     );
@@ -272,6 +360,12 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
         user={user}
         userName={userName}
         rewardOutcome={rewardOutcome}
+        syncStatus={syncStatus}
+        onRetrySync={() => {
+          if (lastActivityInputRef.current) {
+            void syncWordsmithBatch(lastActivityInputRef.current, lastRewardsRef.current ?? rewards);
+          }
+        }}
         onRestart={goToMenu}
       />
     );

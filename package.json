@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:cn": "VITE_APP_REGION=cn vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "build:cn": "VITE_APP_REGION=cn vite build --outDir dist-cn",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-cn",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/k12/__tests__/*.test.ts"
   },
   "dependencies": {
+    "@fontsource/nunito": "^5.3.0",
     "@google/genai": "^1.29.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",

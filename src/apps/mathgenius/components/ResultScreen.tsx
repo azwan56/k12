@@ -11,6 +11,7 @@ import {
   Timer
 } from 'lucide-react';
 import { QuizResult, Question, UserAnswer, DIFFICULTY_CONFIGS } from '../types';
+import ActivitySyncStatus, { type ActivitySyncState } from '../../../k12/ActivitySyncStatus';
 import ReportActions from '../../../k12/ReportActions';
 import type { ActivityRewardOutcome } from '../../../k12/rewards';
 import RewardBanner from '../../../k12/RewardBanner';
@@ -22,6 +23,8 @@ interface Props {
   isFeedbackLoading: boolean;
   language: 'en' | 'zh';
   rewardOutcome?: ActivityRewardOutcome | null;
+  syncStatus?: ActivitySyncState;
+  onRetrySync?: () => void;
   onRetry: () => void;
   onDone: () => void;
 }
@@ -77,7 +80,17 @@ function ReviewItem({ question, idx, ans }: { question: Question; idx: number; a
   );
 }
 
-export default function ResultScreen({ results, questions, isFeedbackLoading, language, rewardOutcome, onRetry, onDone }: Props) {
+export default function ResultScreen({
+  results,
+  questions,
+  isFeedbackLoading,
+  language,
+  rewardOutcome,
+  syncStatus = 'idle',
+  onRetrySync,
+  onRetry,
+  onDone,
+}: Props) {
   const reportRef = useRef<HTMLDivElement>(null);
 
   const percentage = results.totalQuestions > 0 ? (results.score / results.totalQuestions) * 100 : 0;
@@ -196,6 +209,8 @@ export default function ResultScreen({ results, questions, isFeedbackLoading, la
       </div>
 
       <RewardBanner outcome={rewardOutcome ?? null} />
+
+      <ActivitySyncStatus status={syncStatus} onRetry={onRetrySync} />
 
       <div className="grid grid-cols-2 gap-4 mt-6">
         <button

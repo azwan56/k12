@@ -19,8 +19,7 @@ export const sendToDiscord = async (webhookUrl: string, blob: Blob, userName: st
     formData.append('file', file);
     formData.append('payload_json', JSON.stringify({
       content: `📊 **WordSmith Practice Report** for **${userName}**\nPractice completed at ${new Date().toLocaleString()}`,
-      username: 'WordSmith Bot',
-      avatar_url: 'https://ais-dev-htg22ilahlcqhdh6gwvi5z-10735257500.us-east5.run.app/favicon.ico' // Use app favicon if available
+      username: 'WordSmith Bot'
     }));
 
     const response = await fetch(cleanUrl, {

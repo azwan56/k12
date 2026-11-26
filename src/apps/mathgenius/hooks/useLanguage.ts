@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Cookies from 'js-cookie';
+import { getCookieDomain } from '../../../lib/region';
 
 type Language = 'en' | 'zh';
 
@@ -26,8 +27,8 @@ export function useLanguage(): [Language, (lang: Language) => void] {
 
     const setLanguage = (newLang: Language) => {
         setLanguageState(newLang);
-        // Store in cookie, share across all subdomains (e.g., .vanpower.live)
-        const domain = window.location.hostname.includes('vanpower.live') ? '.vanpower.live' : window.location.hostname;
+        // Store in cookie, share across all subdomains (e.g., .vanpower.live or .vanpower.net)
+        const domain = getCookieDomain();
         Cookies.set(LANGUAGE_COOKIE_KEY, newLang, { expires: 365, domain, path: '/' });
     };
 

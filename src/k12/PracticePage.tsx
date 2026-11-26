@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, X, RotateCcw } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Check, X, RotateCcw, Sparkles, Zap } from 'lucide-react';
 import {
   Subject,
   GradeLevel,
@@ -10,16 +10,28 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { useRewards } from '../hooks/useRewards';
-import { drawUnseenFromStorage, shuffleOptionsWithAnswer } from './questionDedupe';
+import ActivitySyncStatus, { type ActivitySyncState } from './ActivitySyncStatus';
+import { recordLocalDailyMistake } from './dailyMistakes';
+import {
+  DEFAULT_PRACTICE_ROUND_SIZE,
+  type DynamicRoundResult,
+  buildLocalDynamicRound,
+  fetchDynamicPracticeRound,
+} from './dynamicPracticeService';
+import { buildDeterministicActivityId } from './pendingActivityQueue';
 import ReportActions from './ReportActions';
-import type { ActivityRewardOutcome } from './rewards';
+import type { ActivityRewardOutcome, RewardsState } from './rewards';
 import RewardBanner from './RewardBanner';
-import type { QuestionReviewItem } from './studentProgress';
+import {
+  type QuestionReviewItem,
+  type RecordActivityInput,
+  formatInProgressSummary,
+} from './studentProgress';
 import { recordStudentActivity } from './studentProgressService';
 import { THEME, replaceQuery } from './ui';
 import { BackLink, DifficultyFilter, parseDifficultyFilter } from './SubjectPage';
 
-const PRACTICE_ROUND_SIZE = 8;
+const PRACTICE_ROUND_SIZE = DEFAULT_PRACTICE_ROUND_SIZE;
 
 interface ReviewEntry extends QuestionReviewItem {
   explanation: string;
@@ -43,9 +55,15 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
     parseDifficultyFilter(initialDifficulty)
   );
   const [round, setRound] = useState(0);
-  const { user } = useAuth();
+  const { user, loading: authLoading, needsSSOSync, signInWithGoogle } = useAuth();
   const { profile, resolvedName, effectiveAvatarId } = useProfile();
-  const { recordPractice } = useRewards();
+  const { rewards, recordPractice } = useRewards();
+  const uidRef = useRef<string | undefined>(user?.uid);
+  uidRef.current = user?.uid;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const metaRef = useRef({ profile, resolvedName, effectiveAvatarId, rewards });
+  metaRef.current = { profile, resolvedName, effectiveAvatarId, rewards };
 
   const basePool = useMemo(
     () =>
@@ -66,7 +84,80 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
   const backQs = backParams.toString();
   const backHref = `#/s/${subject.id}${backQs ? `?${backQs}` : ''}`;
 
+  const roundKey = `${subject.id}|${grade}|${activeTrack?.id || 'main'}|${difficultyFilter}|${round}`;
+  const [poolDraw, setPoolDraw] = useState<DynamicRoundResult>(() => ({
+    questions: [],
+    totalPoolSize: basePool.length,
+    dynamicCount: 0,
+    aiCount: 0,
+  }));
+  const [loadingRound, setLoadingRound] = useState(false);
+  const loadedKeyRef = useRef('');
+  const requestSeqRef = useRef(0);
+
+  const buildLocalRoundNow = useCallback(
+    () =>
+      buildLocalDynamicRound({
+        subject,
+        grade,
+        trackId: activeTrack?.id,
+        trackName: activeTrack?.nameZh,
+        topics: activeTrack?.topics ?? subject.topics[grade],
+        difficulty: difficultyFilter,
+        count: PRACTICE_ROUND_SIZE,
+        uid: uidRef.current,
+      }),
+    [subject, grade, activeTrack, difficultyFilter]
+  );
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (loadedKeyRef.current === roundKey) return;
+    loadedKeyRef.current = roundKey;
+    const reqId = ++requestSeqRef.current;
+
+    const shouldTryAi =
+      Boolean(uidRef.current) &&
+      (subject.id === 'english' || subject.id === 'humanity' || subject.id === 'science');
+
+    if (!shouldTryAi) {
+      setLoadingRound(false);
+      setPoolDraw(buildLocalRoundNow());
+      return;
+    }
+
+    setLoadingRound(true);
+    void fetchDynamicPracticeRound({
+      subject,
+      grade,
+      trackId: activeTrack?.id,
+      trackName: activeTrack?.nameZh,
+      topics: activeTrack?.topics ?? subject.topics[grade],
+      difficulty: difficultyFilter,
+      count: PRACTICE_ROUND_SIZE,
+      uid: uidRef.current,
+    })
+      .then((res) => {
+        if (reqId !== requestSeqRef.current) return;
+        setPoolDraw(res);
+        setLoadingRound(false);
+      })
+      .catch(() => {
+        if (reqId !== requestSeqRef.current) return;
+        setPoolDraw(buildLocalRoundNow());
+        setLoadingRound(false);
+      });
+  }, [authLoading, roundKey, subject, grade, activeTrack, difficultyFilter, buildLocalRoundNow]);
+
+  const skipAiLoading = () => {
+    requestSeqRef.current += 1;
+    setLoadingRound(false);
+    setPoolDraw(buildLocalRoundNow());
+  };
+
   const switchDifficulty = (nextDiff: DifficultyFilter) => {
+    if (nextDiff === difficultyFilter) return;
+    loadedKeyRef.current = '';
     setDifficultyFilter(nextDiff);
     setRound(0);
     const params: Record<string, string> = {};
@@ -74,58 +165,6 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
     if (nextDiff !== 'all') params.d = nextDiff;
     replaceQuery(['s', subject.id, 'practice'], params);
   };
-
-  // Draw unseen-first questions & shuffle option order each round so repeats and position memorization drop sharply.
-  const poolDraw = useMemo(() => {
-    const scope = `practice_${user?.uid || 'guest'}_${subject.id}_${grade}_${activeTrack?.id || 'main'}`;
-
-    if (hasDifficultyTiers && difficultyFilter === 'all') {
-      const fPool = basePool.filter((q) => q.difficulty === 'foundation');
-      const sPool = basePool.filter((q) => q.difficulty === 'standard');
-      const cPool = basePool.filter((q) => q.difficulty === 'challenge');
-
-      if (fPool.length > 0 && sPool.length > 0 && cPool.length > 0) {
-        const fDraw = drawUnseenFromStorage(`${scope}_foundation`, fPool, (item) => item.id, 3);
-        const sDraw = drawUnseenFromStorage(`${scope}_standard`, sPool, (item) => item.id, 3);
-        const cDraw = drawUnseenFromStorage(`${scope}_challenge`, cPool, (item) => item.id, 2);
-        const combined = [...fDraw.selected, ...sDraw.selected, ...cDraw.selected];
-        return {
-          totalPoolSize: basePool.length,
-          questions: combined.map((q) => {
-            const shuffled = shuffleOptionsWithAnswer(q.options, q.answer);
-            return { ...q, options: shuffled.options, answer: shuffled.answer };
-          }),
-        };
-      }
-    }
-
-    if (hasDifficultyTiers && difficultyFilter !== 'all') {
-      const tierPool = basePool.filter((q) => q.difficulty === difficultyFilter);
-      const effectivePool = tierPool.length > 0 ? tierPool : basePool;
-      const drawn = drawUnseenFromStorage(
-        `${scope}_${difficultyFilter}`,
-        effectivePool,
-        (item) => item.id,
-        PRACTICE_ROUND_SIZE
-      );
-      return {
-        totalPoolSize: drawn.totalPoolSize,
-        questions: drawn.selected.map((q) => {
-          const shuffled = shuffleOptionsWithAnswer(q.options, q.answer);
-          return { ...q, options: shuffled.options, answer: shuffled.answer };
-        }),
-      };
-    }
-
-    const drawn = drawUnseenFromStorage(scope, basePool, (item) => item.id, PRACTICE_ROUND_SIZE);
-    return {
-      totalPoolSize: drawn.totalPoolSize,
-      questions: drawn.selected.map((q) => {
-        const shuffled = shuffleOptionsWithAnswer(q.options, q.answer);
-        return { ...q, options: shuffled.options, answer: shuffled.answer };
-      }),
-    };
-  }, [subject, grade, activeTrack?.id, basePool, hasDifficultyTiers, difficultyFilter, round, user?.uid]);
 
   const questions = poolDraw.questions;
 
@@ -135,21 +174,32 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
   const [rewardOutcome, setRewardOutcome] = useState<ActivityRewardOutcome | null>(null);
   const [reviewList, setReviewList] = useState<ReviewEntry[]>([]);
   const [durationSec, setDurationSec] = useState<number | null>(null);
+  const [syncStatus, setSyncStatus] = useState<ActivitySyncState>('idle');
+  const [liveRecordedCount, setLiveRecordedCount] = useState(0);
   const awardedRef = useRef(false);
   const answersRef = useRef<QuestionReviewItem[]>([]);
   const startedAtRef = useRef(Date.now());
+  const sessionIdRef = useRef(buildDeterministicActivityId('practice', startedAtRef.current));
+  const pendingInputRef = useRef<RecordActivityInput | null>(null);
+  const rewardsStateRef = useRef<RewardsState | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   const restart = () => {
+    const now = Date.now();
     setIndex(0);
     setChosen(null);
     setScore(0);
     setRewardOutcome(null);
     setReviewList([]);
     setDurationSec(null);
+    setSyncStatus('idle');
+    setLiveRecordedCount(0);
     awardedRef.current = false;
     answersRef.current = [];
-    startedAtRef.current = Date.now();
+    startedAtRef.current = now;
+    sessionIdRef.current = buildDeterministicActivityId('practice', now);
+    pendingInputRef.current = null;
+    rewardsStateRef.current = null;
   };
 
   useEffect(restart, [questions]);
@@ -161,51 +211,69 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
       : PRACTICE_DIFFICULTY_META[difficultyFilter].label
     : null;
 
+  const syncCurrentRound = useCallback(
+    async (input: RecordActivityInput, rewardsState: RewardsState) => {
+      if (!user) {
+        await recordStudentActivity(
+          null,
+          { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+          input
+        );
+        setSyncStatus('guest');
+        return;
+      }
+      setSyncStatus('syncing');
+      const id = await recordStudentActivity(
+        user,
+        { profile, resolvedName, effectiveAvatarId, rewards: rewardsState },
+        input
+      );
+      setSyncStatus(id ? 'synced' : 'error');
+    },
+    [user, profile, resolvedName, effectiveAvatarId]
+  );
+
   useEffect(() => {
-    if (finished && !awardedRef.current) {
+    if (finished && !awardedRef.current && !authLoading) {
       awardedRef.current = true;
       const outcome = recordPractice(score, questions.length);
       setRewardOutcome(outcome);
+      rewardsStateRef.current = outcome.nextState;
       const elapsedSec = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
       setDurationSec(elapsedSec);
-      if (user) {
-        const accuracyPct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
-        const trackTitle = activeTrack ? ` · ${activeTrack.nameZh}` : '';
-        const diffTitle = difficultySummaryLabel ? ` · ${difficultySummaryLabel}` : '';
-        void recordStudentActivity(
-          user,
-          { profile, resolvedName, effectiveAvatarId, rewards: outcome.nextState },
-          {
-            type: 'practice',
-            subjectId: subject.id,
-            title: `${subject.name}${trackTitle} · ${gradeLabel(grade)}${diffTitle}练习`,
-            grade,
-            score,
-            maxScore: questions.length,
-            accuracyPct,
-            durationSec: elapsedSec,
-            difficulty: hasDifficultyTiers
-              ? difficultyFilter === 'all'
-                ? 'mixed'
-                : difficultyFilter
-              : null,
-            summary: `完成 ${questions.length} 题，答对 ${score} 题（正确率 ${accuracyPct}%）`,
-            questionItems: answersRef.current,
-          }
-        ).catch((err) => {
-          console.warn('[PracticePage] Failed to record activity:', err);
-        });
-      }
+
+      const accuracyPct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
+      const trackTitle = activeTrack ? ` · ${activeTrack.nameZh}` : '';
+      const diffTitle = difficultySummaryLabel ? ` · ${difficultySummaryLabel}` : '';
+      const input: RecordActivityInput = {
+        id: sessionIdRef.current,
+        type: 'practice',
+        subjectId: subject.id,
+        title: `${subject.name}${trackTitle} · ${gradeLabel(grade)}${diffTitle}练习`,
+        grade,
+        score,
+        maxScore: questions.length,
+        accuracyPct,
+        durationSec: elapsedSec,
+        difficulty: hasDifficultyTiers
+          ? difficultyFilter === 'all'
+            ? 'mixed'
+            : difficultyFilter
+          : null,
+        summary: `完成 ${questions.length} 题，答对 ${score} 题（正确率 ${accuracyPct}%）`,
+        questionItems: [...answersRef.current],
+        createdAt: startedAtRef.current,
+        isComplete: true,
+      };
+      pendingInputRef.current = input;
+      void syncCurrentRound(input, outcome.nextState);
     }
   }, [
     finished,
+    authLoading,
     score,
     questions.length,
     recordPractice,
-    user,
-    profile,
-    resolvedName,
-    effectiveAvatarId,
     subject.id,
     subject.name,
     activeTrack,
@@ -213,7 +281,42 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
     hasDifficultyTiers,
     difficultyFilter,
     difficultySummaryLabel,
+    syncCurrentRound,
   ]);
+
+  useEffect(() => {
+    if (finished && user && syncStatus === 'guest' && pendingInputRef.current) {
+      void syncCurrentRound(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+    }
+  }, [finished, user, syncStatus, syncCurrentRound, rewards]);
+
+  if (loadingRound) {
+    return (
+      <>
+        <BackLink href={backHref} />
+        <div className="chunky bg-amber-50 p-8 mt-6 text-center">
+          <div className="text-4xl mb-3" aria-hidden="true">
+            ✨
+          </div>
+          <h1 className="text-2xl font-black flex items-center justify-center gap-2">
+            <Sparkles className="w-6 h-6 text-amber-600 animate-pulse" aria-hidden="true" />
+            正在为本轮实时生成新题…
+          </h1>
+          <p className="font-bold text-slate-600 mt-2 text-sm">
+            每次练习都会动态变化情境与数值，避免固定背答案，请稍候几秒。
+          </p>
+          <button
+            type="button"
+            onClick={skipAiLoading}
+            className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-2 border-ink bg-white hover:bg-yellow-100 text-xs font-black"
+          >
+            <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+            跳过等待，立即用本地新题开始
+          </button>
+        </div>
+      </>
+    );
+  }
 
   if (questions.length === 0) {
     return (
@@ -318,6 +421,17 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
 
         <RewardBanner outcome={rewardOutcome} />
 
+        <ActivitySyncStatus
+          status={syncStatus}
+          needsSSOSync={needsSSOSync}
+          onSignIn={() => void signInWithGoogle()}
+          onRetry={() => {
+            if (pendingInputRef.current) {
+              void syncCurrentRound(pendingInputRef.current, rewardsStateRef.current ?? rewards);
+            }
+          }}
+        />
+
         <div className="grid grid-cols-2 gap-4 mt-6">
           <button
             type="button"
@@ -356,13 +470,73 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
       userAnswer: q.options[i] ?? '',
       correctAnswer: q.options[q.answer] ?? '',
       isCorrect: i === q.answer,
-      ...(q.topic ? { category: q.topic } : {}),
+      ...(q.topic || activeTrack?.nameZh ? { category: q.topic || activeTrack?.nameZh } : {}),
     };
-    answersRef.current.push(entry);
+    const nextAnswers = [...answersRef.current, entry];
+    answersRef.current = nextAnswers;
+    const nextScore = nextAnswers.filter((a) => a.isCorrect).length;
     setReviewList((prev) => [
       ...prev,
       { ...entry, explanation: q.explanation, difficulty: q.difficulty, topic: q.topic },
     ]);
+
+    const trackTitle = activeTrack ? ` · ${activeTrack.nameZh}` : '';
+    const diffTitle = difficultySummaryLabel ? ` · ${difficultySummaryLabel}` : '';
+    const title = `${subject.name}${trackTitle} · ${gradeLabel(grade)}${diffTitle}练习`;
+
+    if (!entry.isCorrect) {
+      recordLocalDailyMistake(userRef.current?.uid ?? null, {
+        activityId: sessionIdRef.current,
+        activityType: 'practice',
+        subjectId: subject.id,
+        activityTitle: title,
+        grade,
+        isIncompleteSession: true,
+        category: entry.category,
+        question: entry.question,
+        userAnswer: entry.userAnswer,
+        correctAnswer: entry.correctAnswer,
+      });
+    }
+
+    const answeredCount = nextAnswers.length;
+    const accuracyPct = Math.round((nextScore / answeredCount) * 100);
+    setLiveRecordedCount(answeredCount);
+    const { profile: curProfile, resolvedName: curName, effectiveAvatarId: curAvatar, rewards: curRewards } =
+      metaRef.current;
+    void recordStudentActivity(
+      userRef.current,
+      {
+        profile: curProfile,
+        resolvedName: curName,
+        effectiveAvatarId: curAvatar,
+        rewards: curRewards,
+      },
+      {
+        id: sessionIdRef.current,
+        type: 'practice',
+        subjectId: subject.id,
+        title,
+        grade,
+        score: nextScore,
+        maxScore: questions.length,
+        accuracyPct,
+        durationSec: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        difficulty: hasDifficultyTiers
+          ? difficultyFilter === 'all'
+            ? 'mixed'
+            : difficultyFilter
+          : null,
+        summary: formatInProgressSummary({
+          answered: answeredCount,
+          total: questions.length,
+          correct: nextScore,
+        }),
+        questionItems: nextAnswers,
+        createdAt: startedAtRef.current,
+        isComplete: false,
+      }
+    );
   };
 
   const next = () => {
@@ -372,12 +546,19 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
 
   return (
     <>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <BackLink href={backHref} />
-        <span className="font-extrabold text-slate-600 mt-2 text-sm sm:text-base tabular-nums">
-          {poolDraw.totalPoolSize > questions.length ? `题库 ${poolDraw.totalPoolSize} 题 · ` : ''}
-          {index + 1} / {questions.length}
-        </span>
+        <div className="flex items-center gap-2 mt-2">
+          {liveRecordedCount > 0 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-300 font-extrabold text-emerald-800">
+              ☁️ 已实时记录 {liveRecordedCount} 题
+            </span>
+          )}
+          <span className="font-extrabold text-slate-600 text-sm sm:text-base tabular-nums">
+            {poolDraw.totalPoolSize > questions.length ? `题库 ${poolDraw.totalPoolSize} 题 · ` : ''}
+            {index + 1} / {questions.length}
+          </span>
+        </div>
       </div>
 
       {/* Inline Difficulty Tier Switcher */}
@@ -423,7 +604,7 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
         ))}
       </div>
 
-      {(qDiffMeta || q.topic) && (
+      {(qDiffMeta || q.topic || q.dynamicSource) && (
         <div className="flex flex-wrap items-center gap-2 mt-6">
           {qDiffMeta && (
             <span className={`px-3 py-0.5 rounded-full border-2 border-ink text-xs font-black ${qDiffMeta.badgeClass}`}>
@@ -435,10 +616,20 @@ export default function PracticePage({ subject, grade, track, initialDifficulty 
               {q.topic}
             </span>
           )}
+          {q.dynamicSource === 'ai' && (
+            <span className="px-2.5 py-0.5 rounded-full border-2 border-amber-500 bg-amber-50 text-[11px] font-black text-amber-900">
+              ✨ AI 实时新题
+            </span>
+          )}
+          {q.dynamicSource === 'procedural' && (
+            <span className="px-2.5 py-0.5 rounded-full border-2 border-violet-500 bg-violet-50 text-[11px] font-black text-violet-900">
+              🎲 动态变式新题
+            </span>
+          )}
         </div>
       )}
 
-      <h1 className={`text-2xl sm:text-3xl font-black leading-snug ${qDiffMeta || q.topic ? 'mt-4' : 'mt-8'}`}>
+      <h1 className={`text-2xl sm:text-3xl font-black leading-snug ${qDiffMeta || q.topic || q.dynamicSource ? 'mt-4' : 'mt-8'}`}>
         {q.question}
       </h1>
 

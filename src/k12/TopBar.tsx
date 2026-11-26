@@ -3,6 +3,7 @@ import { BarChart3, Check, ChevronDown, LogIn, LogOut, Pencil, Settings, X } fro
 import { useAuth } from '../hooks/useAuth';
 import { useRewards } from '../hooks/useRewards';
 import { useProfile } from '../hooks/useProfile';
+import { formatAccountDisplay, isCnRegion } from '../lib/region';
 import { TITLES, getActiveTitle, getUnlockedTitles } from './rewards';
 import { AVATAR_OPTIONS, MAX_DISPLAY_NAME_LENGTH } from './profile';
 import UserAvatar from './UserAvatar';
@@ -262,7 +263,7 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
                   )}
 
                   <p className="text-xs font-semibold text-slate-500 truncate mt-0.5">
-                    {user?.email || '本地访客档案 · 登录后自动云同步'}
+                    {user ? formatAccountDisplay(user.email, user.provider) : '本地访客档案 · 登录后自动云同步'}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-yellow-100 border border-ink/20 text-ink">
@@ -289,8 +290,8 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
                       type="button"
                       onClick={() => void updateProfile({ avatarId: 'google' })}
                       aria-pressed={effectiveAvatarId === 'google'}
-                      aria-label="使用 Google 头像"
-                      title="Google 账号头像"
+                      aria-label={isCnRegion() ? '使用微信头像' : '使用 Google 头像'}
+                      title={isCnRegion() ? '微信账号头像' : 'Google 账号头像'}
                       className={`p-0.5 rounded-full transition-transform ${
                         effectiveAvatarId === 'google'
                           ? 'ring-2 ring-ink ring-offset-2 scale-105'
@@ -387,7 +388,13 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
                     className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border-2 border-ink bg-ink text-white hover:bg-slate-800 text-sm font-extrabold transition-colors"
                   >
                     <LogIn className="w-4 h-4" />
-                    <span>{needsSSOSync ? '同步 Google 登录' : '使用 Google 登录同步'}</span>
+                    <span>
+                      {isCnRegion()
+                        ? '使用微信登录同步'
+                        : needsSSOSync
+                          ? '同步 Google 登录'
+                          : '使用 Google 登录同步'}
+                    </span>
                   </button>
                 )}
               </div>

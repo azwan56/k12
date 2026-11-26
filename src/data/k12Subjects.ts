@@ -27,11 +27,11 @@ export const PRACTICE_DIFFICULTY_META: Record<
     desc: '多步综合应用与同步提高',
   },
   challenge: {
-    label: '竞赛培优',
+    label: '培优挑战',
     shortLabel: '培优',
     emoji: '🏆',
     badgeClass: 'bg-violet-100 text-violet-900',
-    desc: 'AMC 8 / UKMT / 一课一练★拓展压轴',
+    desc: '综合探究、跨概念应用与竞赛拓展',
   },
 };
 
@@ -45,6 +45,7 @@ export interface PracticeQuestion {
   options: string[];
   answer: number;
   explanation: string;
+  dynamicSource?: 'procedural' | 'ai';
 }
 
 export interface SubTrack {
@@ -119,14 +120,20 @@ export const SUBJECTS: Subject[] = [
   {
     id: 'humanity',
     name: 'Humanity',
-    nameZh: '人文',
+    nameZh: '世界人文',
     emoji: '🌍',
-    short: { G6: '古文明与地图', G7: '历史 + 地理' },
+    short: { G6: '生物群落 · 早期人类 · 古文明 · 地图', G7: '历史 + 地理' },
     topics: {
-      G6: ['大河文明', '地图技能', '史料辨析', '早期贸易'],
+      G6: [],
       G7: []
     },
     tracks: {
+      G6: [
+        { id: 'biomes', name: 'Unit 1 · Biomes', nameZh: '生物群落与人类影响', emoji: '🌊', topics: ['六大生物群落', '海洋生态系统', '人类影响', '可持续发展'] },
+        { id: 'early-humans', name: 'Unit 2 · Early Humans', nameZh: '早期人类与农业革命', emoji: '🦴', topics: ['旧石器狩猎采集', '工具与部落协作', '人类迁徙', '新石器农业革命'] },
+        { id: 'civilizations', name: 'Unit 3 · Civilizations', nameZh: '大河与古代文明', emoji: '🏺', topics: ['两河与古埃及', '印度河与早期中国', '希腊罗马与丝路', 'GRAPES 与史料辨析'] },
+        { id: 'geography-skills', name: 'Unit 4 · Map Skills', nameZh: '地图与地理探究', emoji: '🧭', topics: ['经纬度与方向', '比例尺与网格坐标', '等高线与地形', '气候图与地图投影'] }
+      ],
       G7: [
         { id: 'history', name: 'History', nameZh: '历史', emoji: '🏛️', topics: ['丝绸之路', '中世纪', '文艺复兴', '史料与偏见'] },
         { id: 'geography', name: 'Geography', nameZh: '地理', emoji: '🗺️', topics: ['气候与生物群落', '人口迁移', '城市化', '可持续发展'] }
@@ -139,13 +146,13 @@ export const SUBJECTS: Subject[] = [
     name: 'Science',
     nameZh: '科学',
     emoji: '🔬',
-    short: { G6: '物理 · 生物 · 化学', G7: '物理 · 生物 · 化学' },
+    short: { G6: 'Stage 7 (0893) · 生物 · 化学 · 物理地球', G7: '物理 · 生物 · 化学' },
     topics: { G6: [], G7: [] },
     tracks: {
       G6: [
-        { id: 'physics', name: 'Physics', nameZh: '物理', emoji: '⚡', topics: ['力与重力', '摩擦力', '简单机械'] },
-        { id: 'biology', name: 'Biology', nameZh: '生物', emoji: '🌱', topics: ['动植物细胞', '光合作用', '食物链'] },
-        { id: 'chemistry', name: 'Chemistry', nameZh: '化学', emoji: '🧪', topics: ['物质三态', '溶解', '混合物分离'] }
+        { id: 'physics', name: 'Physics & Earth', nameZh: '物理与地球', emoji: '⚡', topics: ['U3 力、重力与能量', 'U3 太阳系与潮汐', 'U6 声波与回声', 'U6 地球结构与板块地震', 'U9 电路与电流'] },
+        { id: 'biology', name: 'Biology', nameZh: '生物', emoji: '🌱', topics: ['U1 动植物与特化细胞', 'U1 组织器官系统', 'U4 生物特征与检索表', 'U4 物种与病毒', 'U7 微生物与食物网'] },
+        { id: 'chemistry', name: 'Chemistry', nameZh: '化学', emoji: '🧪', topics: ['U2 粒子模型与水循环', 'U2 原子、元素与化合物', 'U5 金属/非金属与酸碱pH', 'U8 化学反应与气体检验', 'U8 混合物分离'] }
       ],
       G7: [
         { id: 'physics', name: 'Physics', nameZh: '物理', emoji: '⚡', topics: ['速度与图像', '能量守恒', '电路', '光与声'] },

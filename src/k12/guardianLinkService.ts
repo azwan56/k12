@@ -9,8 +9,10 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import type { User } from 'firebase/auth';
+import type { AppUser } from '../lib/authTypes';
 import { db } from '../lib/firebase';
+import { isCnRegion } from '../lib/region';
+import { cnApi } from '../lib/cnApi';
 import { isValidDiscordWebhookUrl } from '../lib/security';
 import type { AvatarId } from './profile';
 import {
@@ -30,6 +32,9 @@ export const GUARDIAN_LINKS_COLLECTION = 'guardian_links';
 
 export async function fetchParentStudentLinks(parentUid: string): Promise<GuardianLink[]> {
   if (!parentUid) return [];
+  if (isCnRegion()) {
+    return cnApi.fetchParentStudentLinks();
+  }
   const q = query(
     collection(db, GUARDIAN_LINKS_COLLECTION),
     where('parentUid', '==', parentUid)
@@ -44,6 +49,9 @@ export async function fetchParentStudentLinks(parentUid: string): Promise<Guardi
 }
 
 export async function fetchStudentGuardianLinks(studentEmail: string): Promise<GuardianLink[]> {
+  if (isCnRegion()) {
+    return cnApi.fetchStudentGuardianLinks();
+  }
   const normalized = normalizeEmail(studentEmail);
   if (!isValidEmailAddress(normalized)) return [];
   const q = query(
@@ -104,8 +112,20 @@ export async function addStudentLink(params: {
   return sanitizeGuardianLink(linkId, payload)!;
 }
 
+export async function createGuardianInvite(): Promise<{ code: string; expiresAt: number }> {
+  return cnApi.createGuardianInvite();
+}
+
+export async function acceptGuardianInvite(code: string): Promise<GuardianLink> {
+  return cnApi.acceptGuardianInvite(code);
+}
+
 export async function removeGuardianLink(linkId: string): Promise<void> {
   if (!linkId) return;
+  if (isCnRegion()) {
+    await cnApi.removeGuardianLink(linkId);
+    return;
+  }
   await deleteDoc(doc(db, GUARDIAN_LINKS_COLLECTION, linkId));
 }
 
@@ -113,7 +133,7 @@ export async function syncParentLinksMetadata(
   parentUid: string,
   updates: { parentName?: string; discordWebhookUrl?: string }
 ): Promise<void> {
-  if (!parentUid) return;
+  if (!parentUid || isCnRegion()) return;
   const links = await fetchParentStudentLinks(parentUid);
   if (links.length === 0) return;
 
@@ -143,7 +163,7 @@ export async function syncStudentLinksProfile(
   studentUser: { uid: string; email?: string | null; photoURL?: string | null },
   profileInfo: { displayName: string; avatarId: AvatarId }
 ): Promise<void> {
-  if (!studentUser.uid || !studentUser.email) return;
+  if (!studentUser.uid || !studentUser.email || isCnRegion()) return;
   const links = await fetchStudentGuardianLinks(studentUser.email);
   if (links.length === 0) return;
 
@@ -180,9 +200,12 @@ export async function syncStudentLinksProfile(
 }
 
 export async function resolvePortalReportTargets(
-  user: User,
+  user: Pick<AppUser, 'uid' | 'email'>,
   fallbackName: string
 ): Promise<{ targets: WebhookDestination[]; senderName: string }> {
+  if (isCnRegion()) {
+    return { targets: [], senderName: fallbackName };
+  }
   const snap = await getDoc(doc(db, 'users', user.uid));
   const profile = snap.exists() ? (snap.data() as Record<string, any>) : null;
   const senderName =

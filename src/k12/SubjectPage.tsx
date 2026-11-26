@@ -101,7 +101,7 @@ export default function SubjectPage({ subject, grade, initialTrack, initialDiffi
             <h1 className="text-4xl font-black">{subject.name}</h1>
             {poolQuestions.length > 0 && (
               <span className="px-3 py-1 rounded-full border-2 border-ink bg-yellow-100 text-xs font-black tabular-nums">
-                📚 本年级题库共 {poolQuestions.length} 题
+                📚 {track ? `当前单元题库 ${poolQuestions.length} 题` : `本年级题库共 ${poolQuestions.length} 题`} · 每次动态出新题 · 逐题实时记录
               </span>
             )}
           </div>
@@ -127,22 +127,35 @@ export default function SubjectPage({ subject, grade, initialTrack, initialDiffi
         </div>
       )}
 
-      {/* IG Math: adaptive MathGenius quiz */}
+      {/* IG Math: adaptive MathGenius quiz & Grade 6 Comprehensive Exam */}
       {subject.id === 'ig-math' && (
-        <a href="#/s/ig-math/mathgenius" className="chunky bg-white p-5 mt-8 w-full flex items-center gap-3">
-          <span className="text-3xl" aria-hidden="true">🚀</span>
-          <span className="text-xl font-black flex-1">MathGenius 闯关</span>
-          <ArrowRight className="w-5 h-5" aria-hidden="true" />
-        </a>
-      )}
-
-      {/* Humanity: 3-season 30-level adventure */}
-      {subject.id === 'humanity' && (
-        <a href="#/s/humanity/adventure" className="chunky bg-white p-5 mt-8 w-full flex items-center gap-3">
-          <span className="text-3xl" aria-hidden="true">🏛️</span>
-          <span className="text-xl font-black flex-1">中华历史地理大闯关 · 三季 30 关</span>
-          <ArrowRight className="w-5 h-5" aria-hidden="true" />
-        </a>
+        <div className={grade === 'G6' ? 'grid sm:grid-cols-2 gap-4 mt-8' : 'mt-8'}>
+          <a href="#/s/ig-math/mathgenius" className="chunky bg-white p-5 flex items-center gap-3">
+            <span className="text-3xl" aria-hidden="true">🚀</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-xl font-black">MathGenius 闯关</span>
+              <span className="block text-xs font-bold text-slate-600 mt-0.5">AI 自适应分级数学挑战</span>
+            </span>
+            <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+          </a>
+          {grade === 'G6' && (
+            <a href="#/s/ig-math/g6-exam" className="chunky bg-sky-50 p-5 flex items-center gap-3">
+              <span className="text-3xl" aria-hidden="true">📝</span>
+              <span className="flex-1 min-w-0">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xl font-black">六年级综合练习卷</span>
+                  <span className="px-2 py-0.5 rounded-full border border-ink bg-yellow-300 text-[11px] font-black">
+                    20+10 题
+                  </span>
+                </span>
+                <span className="block text-xs font-bold text-slate-700 mt-0.5">
+                  角与直线 · 方程 · 不等式 · 比例尺 · 单利（＜80% 自动加练 10 题）
+                </span>
+              </span>
+              <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+            </a>
+          )}
+        </div>
       )}
 
       {/* Sub-tracks */}
@@ -206,7 +219,7 @@ export default function SubjectPage({ subject, grade, initialTrack, initialDiffi
           </div>
           <p className="text-xs font-bold text-slate-600 mt-2">
             {difficulty === 'all'
-              ? '每组自动按“3 道基础 → 3 道进阶 → 2 道竞赛培优”渐进抽题，优先抽取未做过的新题。'
+              ? '每组自动按“3 道基础 → 3 道进阶 → 2 道培优挑战”渐进抽题，优先抽取未做过的新题。'
               : PRACTICE_DIFFICULTY_META[difficulty].desc}
           </p>
         </div>

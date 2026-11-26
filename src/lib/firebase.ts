@@ -1,10 +1,17 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getFunctions } from "firebase/functions";
+import { initializeApp, type FirebaseApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, type Auth } from "firebase/auth";
+import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFunctions, type Functions } from "firebase/functions";
+import { isCnRegion } from "./region";
 
-// Your web app's Firebase configuration
-const firebaseConfig = {
+let app: FirebaseApp | null = null;
+let auth: Auth = null as unknown as Auth;
+let googleProvider: GoogleAuthProvider = null as unknown as GoogleAuthProvider;
+let db: Firestore = null as unknown as Firestore;
+let functions: Functions = null as unknown as Functions;
+
+if (!isCnRegion()) {
+  const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
     projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -12,13 +19,13 @@ const firebaseConfig = {
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
-};
+  };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
-const db = getFirestore(app);
-const functions = getFunctions(app, "us-central1");
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+  db = getFirestore(app);
+  functions = getFunctions(app, "us-central1");
+}
 
 export { app, auth, googleProvider, db, functions };

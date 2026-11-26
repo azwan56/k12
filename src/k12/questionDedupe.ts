@@ -6,6 +6,7 @@ export interface DeckDrawResult<T> {
 
 const DECK_STORAGE_PREFIX = 'k12_qdeck_v1_';
 const MATH_STEM_STORAGE_PREFIX = 'k12_mg_stems_v1_';
+const PRACTICE_STEM_STORAGE_PREFIX = 'k12_practice_stems_v1_';
 
 export function shuffleArray<T>(items: readonly T[]): T[] {
   const arr = [...items];
@@ -202,6 +203,42 @@ export function rememberRecentMathStems(uid: string | undefined, stems: readonly
       }
     }
     localStorage.setItem(key, JSON.stringify(Array.from(dedup).slice(-40)));
+  } catch {
+    // Ignore storage quota failures
+  }
+}
+
+export function getRecentPracticeStems(scope: string, maxCount = 24): string[] {
+  if (typeof localStorage === 'undefined' || !scope) return [];
+  try {
+    const raw = localStorage.getItem(`${PRACTICE_STEM_STORAGE_PREFIX}${scope}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((s): s is string => typeof s === 'string')
+      .map(normalizeStem)
+      .filter(Boolean)
+      .slice(-Math.max(1, maxCount));
+  } catch {
+    return [];
+  }
+}
+
+export function rememberRecentPracticeStems(scope: string, stems: readonly string[]): void {
+  if (typeof localStorage === 'undefined' || !scope || stems.length === 0) return;
+  try {
+    const key = `${PRACTICE_STEM_STORAGE_PREFIX}${scope}`;
+    const existing = getRecentPracticeStems(scope, 30);
+    const dedup = new Set<string>(existing);
+    for (const raw of stems) {
+      const clean = normalizeStem(raw);
+      if (clean) {
+        dedup.delete(clean);
+        dedup.add(clean);
+      }
+    }
+    localStorage.setItem(key, JSON.stringify(Array.from(dedup).slice(-30)));
   } catch {
     // Ignore storage quota failures
   }

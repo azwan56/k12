@@ -1,4 +1,4 @@
-import type { User } from 'firebase/auth';
+import type { AppUser } from '../../../lib/authTypes';
 import { resolvePortalReportTargets } from '../../../k12/guardianLinkService';
 import { sendToDiscord } from './discordService';
 
@@ -15,7 +15,7 @@ export type ReportTarget = {
  * Returns null when nothing is configured.
  */
 export async function resolveReportTarget(
-  user: User,
+  user: AppUser,
   fallbackName: string
 ): Promise<ReportTarget> {
   const { targets, senderName } = await resolvePortalReportTargets(user, fallbackName);

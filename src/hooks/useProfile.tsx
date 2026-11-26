@@ -8,6 +8,8 @@ import React, {
 } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { isCnRegion } from '../lib/region';
+import { cnApi } from '../lib/cnApi';
 import { useAuth } from './useAuth';
 import {
   AvatarId,
@@ -54,6 +56,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
       currentUser: { uid: string; displayName: string | null; email: string | null; photoURL: string | null },
       isNewDoc = false
     ) => {
+      if (isCnRegion()) {
+        await cnApi.updateProfile(nextProfile);
+        return;
+      }
       const userRef = doc(db, 'users', currentUser.uid);
       const effectiveName = resolveProfileName(nextProfile, currentUser, 'User');
       const payload: Record<string, unknown> = {
@@ -84,6 +90,33 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
     (async () => {
       try {
         const local = loadLocalProfile();
+        if (isCnRegion()) {
+          const state = await cnApi.getUserState();
+          if (cancelled) return;
+          const remote = state.profile ? sanitizeProfile(state.profile, local.grade) : null;
+          let merged = mergeProfile(local, remote);
+          if (!state.profile && local.updatedAt === 0 && user.photoURL && merged.avatarId === 'owl') {
+            merged = { ...merged, avatarId: 'google' };
+          }
+          profileRef.current = merged;
+          setProfile(merged);
+          saveLocalProfile(merged);
+          if (!state.profile || local.updatedAt > (remote?.updatedAt ?? 0)) {
+            const toPush: PortalProfile =
+              merged.updatedAt === 0 ? { ...merged, updatedAt: Date.now() } : merged;
+            if (toPush !== merged) {
+              profileRef.current = toPush;
+              setProfile(toPush);
+              saveLocalProfile(toPush);
+            }
+            await cnApi.updateProfile(toPush);
+          }
+          if (!cancelled) {
+            syncedUidRef.current = user.uid;
+          }
+          return;
+        }
+
         const userRef = doc(db, 'users', user.uid);
         const snap = await getDoc(userRef);
         if (cancelled) return;
