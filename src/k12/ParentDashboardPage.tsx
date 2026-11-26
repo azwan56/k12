@@ -401,7 +401,7 @@ export default function ParentDashboardPage({
           <h1 className="text-3xl font-black">家长督学看板</h1>
           <p className="font-bold text-slate-700 mt-2 max-w-md mx-auto">
             {cnMode
-              ? '请先使用家长微信登录，生成 6 位绑定码发送给孩子，即可实时查看各科掌握度、每日打卡、错题明细与作文内容。'
+              ? '请先使用家长账号登录，生成 6 位绑定码发送给孩子，即可实时查看各科掌握度、每日打卡、错题明细与作文内容。'
               : '请先使用家长或教师的 Google 邮箱登录，即可绑定孩子的学习邮箱，查看各科掌握度、每日打卡、错题明细与作文内容。'}
           </p>
           <button
@@ -410,7 +410,7 @@ export default function ParentDashboardPage({
             className="chunky bg-yellow-300 px-6 py-3 mt-6 inline-flex items-center gap-2 text-lg font-black"
           >
             <LogIn className="w-5 h-5" aria-hidden="true" />
-            {cnMode ? '使用微信登录' : needsSSOSync ? '同步 Google 登录' : '使用 Google 账号登录'}
+            {cnMode ? '手机号 / 微信登录' : needsSSOSync ? '同步 Google 登录' : '使用 Google 账号登录'}
           </button>
         </div>
       </>

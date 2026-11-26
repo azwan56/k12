@@ -348,7 +348,7 @@ const ConsoleModal: React.FC<ConsoleModalProps> = ({ isOpen, onClose, isDarkMode
                                             </div>
                                             <p className={`text-sm mt-1 truncate ${isDarkMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                                 当前显示：<span className={`font-semibold ${isDarkMode ? 'text-zinc-200' : 'text-zinc-800'}`}>{resolvedName}</span>
-                                                {user ? ` · ${formatAccountDisplay(user.email, user.provider)}` : ''}
+                                                {user ? ` · ${formatAccountDisplay(user.email, user.provider, user.phone)}` : ''}
                                             </p>
                                             <p className={`text-xs mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
                                                 {cnMode

@@ -90,12 +90,17 @@ export function isSyntheticCnEmail(email?: string | null): boolean {
 
 export function formatAccountDisplay(
   email?: string | null,
-  provider?: string | null
+  provider?: string | null,
+  phone?: string | null
 ): string {
+  if (phone && phone.trim()) {
+    return phone.trim();
+  }
   if (email && !isSyntheticCnEmail(email)) {
     return email;
   }
+  if (provider === 'phone') return '手机号账号';
   if (provider === 'wechat') return '微信已登录 · 家庭学习档案';
   if (provider === 'dev') return '本地联调账号';
-  return isCnRegion() ? '微信已登录' : '已登录账号';
+  return isCnRegion() ? '已登录账号' : '已登录账号';
 }

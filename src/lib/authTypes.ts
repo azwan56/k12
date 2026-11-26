@@ -1,4 +1,4 @@
-export type AuthProviderType = 'google' | 'wechat' | 'dev';
+export type AuthProviderType = 'google' | 'wechat' | 'phone' | 'dev';
 
 export interface AppUser {
   uid: string;

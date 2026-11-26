@@ -23,6 +23,7 @@ export interface ServerConfig {
   wechatAppSecret: string;
   wechatWebhookToken: string;
   wechatTemplateIdReport: string;
+  wechatOAuthEnabled: boolean;
   enableDevAuth: boolean;
 }
 
@@ -47,6 +48,14 @@ export function loadConfig(overrides?: Partial<ServerConfig>): ServerConfig {
   const rawDevAuth = overrides?.enableDevAuth ?? (process.env.ENABLE_DEV_AUTH === 'true');
   const enableDevAuth = isProduction ? false : Boolean(rawDevAuth);
 
+  const wechatAppId = overrides?.wechatAppId ?? process.env.WECHAT_APP_ID ?? '';
+  const wechatAppSecret = overrides?.wechatAppSecret ?? process.env.WECHAT_APP_SECRET ?? '';
+  const wechatOAuthEnabled =
+    overrides?.wechatOAuthEnabled ??
+    (process.env.WECHAT_OAUTH_ENABLED === 'false'
+      ? false
+      : Boolean(wechatAppId && wechatAppSecret));
+
   return {
     port: overrides?.port ?? Number(process.env.PORT || 8787),
     nodeEnv,
@@ -64,10 +73,11 @@ export function loadConfig(overrides?: Partial<ServerConfig>): ServerConfig {
     qwenModelPractice: overrides?.qwenModelPractice ?? process.env.QWEN_MODEL_PRACTICE ?? 'qwen-plus',
     qwenModelMathChallenge: overrides?.qwenModelMathChallenge ?? process.env.QWEN_MODEL_MATH_CHALLENGE ?? 'qwen-max',
     qwenModelFast: overrides?.qwenModelFast ?? process.env.QWEN_MODEL_FAST ?? 'qwen-flash',
-    wechatAppId: overrides?.wechatAppId ?? process.env.WECHAT_APP_ID ?? '',
-    wechatAppSecret: overrides?.wechatAppSecret ?? process.env.WECHAT_APP_SECRET ?? '',
+    wechatAppId,
+    wechatAppSecret,
     wechatWebhookToken: overrides?.wechatWebhookToken ?? process.env.WECHAT_WEBHOOK_TOKEN ?? '',
     wechatTemplateIdReport: overrides?.wechatTemplateIdReport ?? process.env.WECHAT_TEMPLATE_ID_REPORT ?? '',
+    wechatOAuthEnabled,
     enableDevAuth,
   };
 }

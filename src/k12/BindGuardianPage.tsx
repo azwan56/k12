@@ -59,14 +59,14 @@ export default function BindGuardianPage({ initialCode }: { initialCode?: string
         {!user ? (
           <div className="mt-6 rounded-2xl border-2 border-ink bg-white p-5 text-center">
             <p className="text-sm font-extrabold text-slate-700 mb-4">
-              请先用学生的微信账号登录，再完成绑定确认
+              请先登录学生账号，再完成绑定确认
             </p>
             <button
               type="button"
               onClick={openLoginModal}
-              className="chunky bg-emerald-400 px-6 py-3 inline-flex items-center gap-2 text-base font-black"
+              className="chunky bg-yellow-300 px-6 py-3 inline-flex items-center gap-2 text-base font-black"
             >
-              <LogIn className="w-5 h-5" /> 立即微信登录
+              <LogIn className="w-5 h-5" /> 立即登录
             </button>
           </div>
         ) : status?.kind === 'ok' ? (

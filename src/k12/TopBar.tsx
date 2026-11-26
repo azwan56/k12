@@ -263,7 +263,7 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
                   )}
 
                   <p className="text-xs font-semibold text-slate-500 truncate mt-0.5">
-                    {user ? formatAccountDisplay(user.email, user.provider) : '本地访客档案 · 登录后自动云同步'}
+                    {user ? formatAccountDisplay(user.email, user.provider, user.phone) : '本地访客档案 · 登录后自动云同步'}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-yellow-100 border border-ink/20 text-ink">
@@ -390,7 +390,7 @@ export default function TopBar({ grade, onGradeChange }: TopBarProps) {
                     <LogIn className="w-4 h-4" />
                     <span>
                       {isCnRegion()
-                        ? '使用微信登录同步'
+                        ? '登录同步学习档案'
                         : needsSSOSync
                           ? '同步 Google 登录'
                           : '使用 Google 登录同步'}

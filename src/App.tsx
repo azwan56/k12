@@ -149,7 +149,7 @@ function AppContent() {
               className="mt-2 mb-4 rounded-2xl border-2 border-ink bg-violet-100 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm font-extrabold text-violet-950"
             >
               <span>
-                📥 本机有 {guestPendingCount} 条未登录时完成的练习，是否同步到当前账号（{formatAccountDisplay(user.email, user.provider)}）？
+                📥 本机有 {guestPendingCount} 条未登录时完成的练习，是否同步到当前账号（{formatAccountDisplay(user.email, user.provider, user.phone)}）？
               </span>
               <div className="flex items-center gap-2 shrink-0">
                 <button

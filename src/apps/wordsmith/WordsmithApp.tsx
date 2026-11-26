@@ -341,7 +341,7 @@ export default function WordsmithApp({ grade }: { grade: GradeLevel }) {
           onClick={() => signInWithGoogle()}
           className="chunky bg-yellow-300 w-full mt-6 py-4 text-xl font-black flex items-center justify-center gap-3"
         >
-          <LogIn className="w-6 h-6" aria-hidden="true" /> {isCnRegion() ? '用微信登录' : '用 Google 登录'}
+          <LogIn className="w-6 h-6" aria-hidden="true" /> {isCnRegion() ? '登录同步开始造句' : '用 Google 登录'}
         </button>
       </>
     );

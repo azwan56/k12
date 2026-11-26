@@ -1,13 +1,40 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Loader2, QrCode, RefreshCw, ShieldCheck, Smartphone, X } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  Phone,
+  QrCode,
+  RefreshCw,
+  ShieldCheck,
+  Smartphone,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { cnApi, CnApiError } from '../lib/cnApi';
 import { getApiBaseUrl, isMobileBrowser, isWeChatBrowser } from '../lib/region';
 
+type LoginTab = 'phone' | 'wechat';
+type PhoneMode = 'login' | 'register';
+
 export default function CnLoginModal() {
   const { loginModalOpen, closeLoginModal, refreshSession } = useAuth();
+  const [activeTab, setActiveTab] = useState<LoginTab>('phone');
+  const [phoneMode, setPhoneMode] = useState<PhoneMode>('login');
   const [agreed, setAgreed] = useState(true);
   const [showPolicy, setShowPolicy] = useState(false);
+
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [grade, setGrade] = useState<'G6' | 'G7'>('G6');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
 
   const [health, setHealth] = useState<{
     wechatConfigured: boolean;
@@ -54,7 +81,7 @@ export default function CnLoginModal() {
     } catch (err) {
       const msg =
         err instanceof CnApiError && err.code === 'WECHAT_NOT_CONFIGURED'
-          ? '微信服务号尚未配置，请在服务器设置 WECHAT_APP_ID 与 WECHAT_APP_SECRET（本地测试可使用下方测试账号）。'
+          ? '微信服务号尚未完成认证配置，请先使用手机号登录或注册。'
           : err instanceof Error
             ? err.message
             : '生成微信登录二维码失败';
@@ -71,6 +98,7 @@ export default function CnLoginModal() {
   useEffect(() => {
     if (!loginModalOpen) return;
     let cancelled = false;
+    setPhoneError('');
 
     cnApi
       .getHealth()
@@ -80,13 +108,14 @@ export default function CnLoginModal() {
           wechatConfigured: res.wechatConfigured,
           devAuthEnabled: res.devAuthEnabled,
         });
-        if (!inWeChat && res.wechatConfigured) {
-          void loadQrCode();
+        if (!res.wechatConfigured) {
+          setActiveTab('phone');
         }
       })
       .catch(() => {
         if (!cancelled) {
           setHealth({ wechatConfigured: false, devAuthEnabled: false });
+          setActiveTab('phone');
         }
       });
 
@@ -98,10 +127,28 @@ export default function CnLoginModal() {
       cancelled = true;
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [loginModalOpen, inWeChat, loadQrCode, closeLoginModal]);
+  }, [loginModalOpen, closeLoginModal]);
 
   useEffect(() => {
-    if (!loginModalOpen || inWeChat || qrState.status !== 'pending' || !qrState.sceneId) {
+    if (
+      loginModalOpen &&
+      activeTab === 'wechat' &&
+      !inWeChat &&
+      health?.wechatConfigured &&
+      qrState.status === 'idle'
+    ) {
+      void loadQrCode();
+    }
+  }, [loginModalOpen, activeTab, inWeChat, health?.wechatConfigured, qrState.status, loadQrCode]);
+
+  useEffect(() => {
+    if (
+      !loginModalOpen ||
+      activeTab !== 'wechat' ||
+      inWeChat ||
+      qrState.status !== 'pending' ||
+      !qrState.sceneId
+    ) {
       return;
     }
     const sceneId = qrState.sceneId;
@@ -129,9 +176,52 @@ export default function CnLoginModal() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [loginModalOpen, inWeChat, qrState.status, qrState.sceneId, refreshSession, closeLoginModal]);
+  }, [loginModalOpen, activeTab, inWeChat, qrState.status, qrState.sceneId, refreshSession, closeLoginModal]);
 
   if (!loginModalOpen) return null;
+
+  const handlePhoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agreed) {
+      setPhoneError('请先阅读并勾选同意用户协议与隐私保护声明');
+      return;
+    }
+    const cleanPhone = phone.replace(/\D/g, '').slice(0, 11);
+    if (!/^1[3-9]\d{9}$/.test(cleanPhone)) {
+      setPhoneError('请输入合法的 11 位中国大陆手机号');
+      return;
+    }
+    if (password.length < (phoneMode === 'register' ? 6 : 1)) {
+      setPhoneError(phoneMode === 'register' ? '请设置至少 6 位登录密码' : '请输入登录密码');
+      return;
+    }
+
+    setPhoneBusy(true);
+    setPhoneError('');
+    try {
+      if (phoneMode === 'register') {
+        await cnApi.phoneRegister({
+          phone: cleanPhone,
+          password,
+          displayName: displayName.trim() || undefined,
+          grade,
+        });
+      } else {
+        await cnApi.phoneLogin({
+          phone: cleanPhone,
+          password,
+        });
+      }
+      await refreshSession();
+      closeLoginModal();
+    } catch (err) {
+      setPhoneError(
+        err instanceof Error ? err.message : phoneMode === 'register' ? '注册失败，请重试' : '登录失败，请检查账号密码'
+      );
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
 
   const handleWeChatH5Login = () => {
     if (!agreed) return;
@@ -169,7 +259,7 @@ export default function CnLoginModal() {
       className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="微信登录 Vanpower K12"
+      aria-label="登录 Vanpower K12"
     >
       <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl border-[3px] border-ink bg-cream shadow-[6px_6px_0_var(--color-ink)] p-6 relative max-h-[92vh] overflow-y-auto">
         <button
@@ -182,17 +272,41 @@ export default function CnLoginModal() {
         </button>
 
         <div className="text-center pr-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl border-[3px] border-ink bg-emerald-300 text-2xl mb-3">
-            💬
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl border-[3px] border-ink bg-yellow-300 text-2xl mb-3">
+            🎓
           </div>
-          <h2 className="text-2xl font-black text-ink">微信登录 Vanpower K12</h2>
+          <h2 className="text-2xl font-black text-ink">登录 Vanpower K12</h2>
           <p className="text-xs sm:text-sm font-bold text-slate-600 mt-1">
             登录后同步云端错题本、能量币心愿与家长督学看板
           </p>
         </div>
 
+        {/* Auth Method Tabs (show WeChat tab when Service Account is configured) */}
+        {health?.wechatConfigured && (
+          <div className="mt-4 grid grid-cols-2 gap-2 p-1 rounded-2xl border-[3px] border-ink bg-white">
+            <button
+              type="button"
+              onClick={() => setActiveTab('phone')}
+              className={`py-2 rounded-xl text-xs sm:text-sm font-black transition-colors flex items-center justify-center gap-1.5 ${
+                activeTab === 'phone' ? 'bg-yellow-300 text-ink border-2 border-ink' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Phone className="w-4 h-4" /> 手机号登录
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('wechat')}
+              className={`py-2 rounded-xl text-xs sm:text-sm font-black transition-colors flex items-center justify-center gap-1.5 ${
+                activeTab === 'wechat' ? 'bg-emerald-300 text-ink border-2 border-ink' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <QrCode className="w-4 h-4" /> 微信登录
+            </button>
+          </div>
+        )}
+
         {/* Consent Checkbox */}
-        <label className="mt-5 flex items-start gap-2.5 p-3 rounded-2xl border-2 border-ink/20 bg-white text-xs font-bold text-slate-700 cursor-pointer">
+        <label className="mt-4 flex items-start gap-2.5 p-3 rounded-2xl border-2 border-ink/20 bg-white text-xs font-bold text-slate-700 cursor-pointer">
           <input
             type="checkbox"
             checked={agreed}
@@ -220,15 +334,143 @@ export default function CnLoginModal() {
             <p className="font-black text-ink flex items-center gap-1">
               <ShieldCheck className="w-4 h-4 text-emerald-700" /> 隐私与安全说明
             </p>
-            <p>1. 我们仅收集微信昵称、头像与学习作答记录，用于同步学习进度与家长督学。</p>
+            <p>1. 我们仅收集手机号（加密存储）/昵称与学习作答记录，用于同步学习进度与家长督学。</p>
             <p>2. 所有数据存储在国内合规云服务，不会向第三方出售或推送广告。</p>
             <p>3. 家长与孩子绑定需经双方确认，且可随时在控制台解除绑定。</p>
           </div>
         )}
 
-        {/* In-WeChat H5 One-Tap Login */}
-        {inWeChat ? (
-          <div className="mt-5 space-y-3">
+        {activeTab === 'phone' ? (
+          <form onSubmit={handlePhoneSubmit} className="mt-4 rounded-2xl border-[3px] border-ink bg-white p-4 sm:p-5 space-y-3.5">
+            <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-amber-50 border-2 border-ink/15">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneMode('login');
+                  setPhoneError('');
+                }}
+                className={`py-1.5 rounded-lg text-xs sm:text-sm font-black transition-colors ${
+                  phoneMode === 'login' ? 'bg-ink text-white' : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                已有账号登录
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneMode('register');
+                  setPhoneError('');
+                }}
+                className={`py-1.5 rounded-lg text-xs sm:text-sm font-black transition-colors ${
+                  phoneMode === 'register' ? 'bg-ink text-white' : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                新用户注册
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-slate-700 mb-1">手机号码</label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={11}
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  placeholder="请输入 11 位手机号"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-ink bg-cream/60 font-bold text-sm outline-none focus:bg-white focus:ring-2 focus:ring-amber-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-slate-700 mb-1">
+                {phoneMode === 'register' ? '设置登录密码（至少 6 位）' : '登录密码'}
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={phoneMode === 'register' ? 'new-password' : 'current-password'}
+                  maxLength={64}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={phoneMode === 'register' ? '请设置 6~64 位密码' : '请输入密码'}
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-ink bg-cream/60 font-bold text-sm outline-none focus:bg-white focus:ring-2 focus:ring-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-ink"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {phoneMode === 'register' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-xs font-black text-slate-700 mb-1">昵称（选填）</label>
+                  <div className="relative">
+                    <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                    <input
+                      type="text"
+                      maxLength={32}
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="如：小明 / 小明妈妈"
+                      className="w-full pl-9 pr-3 py-2 rounded-xl border-2 border-ink bg-cream/60 font-bold text-xs outline-none focus:bg-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-700 mb-1">默认年级</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['G6', 'G7'] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setGrade(g)}
+                        className={`py-2 rounded-xl border-2 border-ink text-xs font-black transition-colors ${
+                          grade === g ? 'bg-yellow-300 text-ink' : 'bg-white text-slate-600'
+                        }`}
+                      >
+                        {g === 'G6' ? '6 年级' : '7 年级'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {phoneError && (
+              <p role="alert" className="text-xs font-extrabold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                {phoneError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={phoneBusy || !agreed}
+              className="chunky bg-yellow-300 hover:bg-yellow-400 w-full py-3 text-base font-black text-ink flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {phoneBusy && <Loader2 className="w-4 h-4 animate-spin" />}
+              {phoneMode === 'register' ? '注册并登录' : '立即登录'}
+            </button>
+
+            {health && !health.wechatConfigured && (
+              <p className="text-[11px] font-bold text-slate-500 text-center pt-1">
+                微信一键登录将在企业服务号认证完成后同步开放
+              </p>
+            )}
+          </form>
+        ) : inWeChat ? (
+          <div className="mt-4 space-y-3">
             <button
               type="button"
               disabled={!agreed || health?.wechatConfigured === false}
@@ -237,15 +479,9 @@ export default function CnLoginModal() {
             >
               <span>💚 微信一键授权登录</span>
             </button>
-            {health?.wechatConfigured === false && (
-              <p className="text-xs font-bold text-amber-800 text-center">
-                微信服务号尚未配置完成，请联系管理员或使用测试账号。
-              </p>
-            )}
           </div>
         ) : (
-          /* PC / iPad Service Account QR Login */
-          <div className="mt-5 rounded-2xl border-[3px] border-ink bg-white p-5 text-center">
+          <div className="mt-4 rounded-2xl border-[3px] border-ink bg-white p-5 text-center">
             <div className="flex items-center justify-center gap-1.5 text-sm font-black text-ink mb-3">
               <QrCode className="w-4 h-4 text-emerald-700" />
               <span>打开微信「扫一扫」登录</span>

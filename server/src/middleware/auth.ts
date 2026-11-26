@@ -5,7 +5,7 @@ import type { DbClient } from '../db/database.js';
 
 export interface SessionClaims {
   sub: string;
-  provider: 'wechat' | 'dev';
+  provider: 'wechat' | 'phone' | 'dev';
 }
 
 export interface AuthenticatedUser {
@@ -15,7 +15,7 @@ export interface AuthenticatedUser {
   avatarId: string;
   photoURL: string | null;
   grade: 'G6' | 'G7';
-  provider: 'wechat' | 'dev';
+  provider: 'wechat' | 'phone' | 'dev';
 }
 
 declare global {
@@ -100,7 +100,7 @@ export function createAuthMiddleware(db: DbClient, config: ServerConfig) {
         avatarId: row.avatar_id || 'owl',
         photoURL: row.photo_url ?? null,
         grade: row.grade === 'G7' ? 'G7' : 'G6',
-        provider: row.provider === 'dev' ? 'dev' : 'wechat',
+        provider: row.provider === 'dev' ? 'dev' : row.provider === 'phone' ? 'phone' : 'wechat',
       };
       next();
     } catch {

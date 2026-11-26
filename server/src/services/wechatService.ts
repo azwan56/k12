@@ -79,7 +79,7 @@ export class WeChatService {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.config.wechatAppId && this.config.wechatAppSecret);
+    return Boolean(this.config.wechatOAuthEnabled && this.config.wechatAppId && this.config.wechatAppSecret);
   }
 
   buildOAuthAuthorizeUrl(params: { redirectUri: string; state: string }): string {

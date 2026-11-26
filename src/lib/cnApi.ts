@@ -84,6 +84,23 @@ export const cnApi = {
       body: JSON.stringify({ role, suffix }),
     }),
 
+  phoneRegister: (payload: {
+    phone: string;
+    password: string;
+    displayName?: string;
+    grade?: 'G6' | 'G7';
+  }) =>
+    apiFetch<{ user: AppUser }>('/api/auth/phone/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  phoneLogin: (payload: { phone: string; password: string }) =>
+    apiFetch<{ user: AppUser }>('/api/auth/phone/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   getUserState: () =>
     apiFetch<{
       profile: Partial<PortalProfile> | null;

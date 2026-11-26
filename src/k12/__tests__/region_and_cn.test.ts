@@ -25,6 +25,10 @@ test('isSyntheticCnEmail & formatAccountDisplay hide internal synthetic addresse
     formatAccountDisplay('u_wx12345@wechat.vanpower.net', 'wechat'),
     '微信已登录 · 家庭学习档案'
   );
+  assert.equal(
+    formatAccountDisplay('u_ph12345@wechat.vanpower.net', 'phone', '138****8000'),
+    '138****8000'
+  );
   assert.equal(formatAccountDisplay('leo@example.com', 'google'), 'leo@example.com');
 });
 

@@ -10,24 +10,38 @@ import {
   signSessionToken,
 } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
-import { upsertDevUser, upsertWeChatUser, type UserRow } from '../services/userService.js';
+import {
+  authenticatePhoneUser,
+  getUserMaskedPhone,
+  maskPhoneNumber,
+  registerPhoneUser,
+  upsertDevUser,
+  upsertWeChatUser,
+  type UserRow,
+} from '../services/userService.js';
 import type { WeChatService } from '../services/wechatService.js';
 
-function formatClientUser(row: {
-  id: string;
-  internal_email: string;
-  display_name: string;
-  avatar_id: string;
-  photo_url: string | null;
-  provider: string;
-}) {
+function formatClientUser(
+  row: {
+    id: string;
+    internal_email: string;
+    display_name: string;
+    avatar_id: string;
+    photo_url: string | null;
+    provider: string;
+  },
+  phone?: string | null
+) {
+  const provider: 'wechat' | 'phone' | 'dev' =
+    row.provider === 'dev' ? 'dev' : row.provider === 'phone' ? 'phone' : 'wechat';
   return {
     uid: row.id,
     displayName: row.display_name || '同学',
     email: row.internal_email,
     photoURL: row.photo_url ?? null,
-    provider: (row.provider === 'dev' ? 'dev' : 'wechat') as 'wechat' | 'dev',
-    wechatBound: row.provider === 'wechat',
+    provider,
+    phone: phone ?? null,
+    wechatBound: provider === 'wechat',
   };
 }
 
@@ -47,6 +61,7 @@ export function createAuthRouter(deps: {
   const { db, config, wechatService } = deps;
   const router = Router();
   const qrLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
+  const phoneLimiter = createRateLimiter({ windowMs: 10 * 60 * 1000, max: 25 });
 
   router.get('/me', async (req, res) => {
     if (!req.authUser) {
@@ -58,7 +73,62 @@ export function createAuthRouter(deps: {
       res.json({ user: null });
       return;
     }
-    res.json({ user: formatClientUser(row) });
+    const maskedPhone = await getUserMaskedPhone(db, row.id);
+    res.json({ user: formatClientUser(row, maskedPhone) });
+  });
+
+  const phoneRegisterSchema = z.object({
+    phone: z.string().regex(/^1[3-9]\d{9}$/, '请输入合法的 11 位中国大陆手机号'),
+    password: z.string().min(6, '密码至少需要 6 位').max(64, '密码不能超过 64 位'),
+    displayName: z.string().max(32).optional(),
+    grade: z.enum(['G6', 'G7']).optional(),
+  });
+
+  router.post('/phone/register', phoneLimiter, async (req, res) => {
+    const parsed = phoneRegisterSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0]?.message || '请检查手机号和密码格式';
+      res.status(400).json({ error: 'INVALID_PARAMS', message: firstIssue });
+      return;
+    }
+
+    try {
+      const user = await registerPhoneUser(db, parsed.data);
+      const token = signSessionToken({ sub: user.id, provider: 'phone' }, config);
+      setSessionCookie(res, token, config);
+      res.json({ user: formatClientUser(user, maskPhoneNumber(parsed.data.phone)) });
+    } catch (err) {
+      if (err instanceof Error && err.message === 'PHONE_ALREADY_REGISTERED') {
+        res.status(409).json({ error: 'PHONE_ALREADY_REGISTERED', message: '该手机号已注册，请直接登录' });
+        return;
+      }
+      console.error('[auth/phone/register] failed:', err);
+      res.status(500).json({ error: 'REGISTER_FAILED', message: '注册失败，请稍后重试' });
+    }
+  });
+
+  const phoneLoginSchema = z.object({
+    phone: z.string().regex(/^1[3-9]\d{9}$/, '请输入合法的 11 位中国大陆手机号'),
+    password: z.string().min(1, '请输入密码').max(64),
+  });
+
+  router.post('/phone/login', phoneLimiter, async (req, res) => {
+    const parsed = phoneLoginSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0]?.message || '请输入合法的手机号与密码';
+      res.status(400).json({ error: 'INVALID_PARAMS', message: firstIssue });
+      return;
+    }
+
+    const user = await authenticatePhoneUser(db, parsed.data);
+    if (!user) {
+      res.status(401).json({ error: 'INVALID_CREDENTIALS', message: '手机号或密码错误' });
+      return;
+    }
+
+    const token = signSessionToken({ sub: user.id, provider: 'phone' }, config);
+    setSessionCookie(res, token, config);
+    res.json({ user: formatClientUser(user, maskPhoneNumber(parsed.data.phone)) });
   });
 
   router.post('/logout', (_req, res) => {

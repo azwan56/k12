@@ -11,6 +11,7 @@ import type { OpenAICompatClient } from '../services/qwenService.js';
 async function startTestServer(options?: {
   wechatFetch?: typeof fetch;
   qwenClient?: OpenAICompatClient;
+  wechatOAuthEnabled?: boolean;
 }) {
   const db = createDbClient({ sqlitePath: ':memory:' });
   await ensureSchema(db);
@@ -21,6 +22,7 @@ async function startTestServer(options?: {
     wechatAppId: 'wx_test_appid',
     wechatAppSecret: 'wx_test_secret',
     wechatWebhookToken: 'wx_test_token',
+    wechatOAuthEnabled: options?.wechatOAuthEnabled,
     dashscopeApiKey: 'sk-test-dashscope',
     appOrigin: 'https://k12.vanpower.net',
     allowedOrigins: ['https://k12.vanpower.net', 'http://localhost:3000'],
@@ -449,6 +451,78 @@ test('Qwen AI endpoints enforce enable_thinking=false, parse wrapped JSON, and c
     assert.equal((await ws2.json()).data[0].word, 'Resilient');
     assert.equal(llmCalls, callsAfterFirst);
     assert.ok(seenThinkingFlags.every((f) => f === false));
+  } finally {
+    await srv.close();
+  }
+});
+
+test('phone register, duplicate check, password login, and wechatOAuthEnabled toggle', async () => {
+  const srv = await startTestServer({ wechatOAuthEnabled: false });
+  try {
+    const health = await fetch(`${srv.baseUrl}/api/health`).then((r) => r.json());
+    assert.equal(health.wechatConfigured, false);
+
+    // Register phone user
+    const regRes = await fetch(`${srv.baseUrl}/api/auth/phone/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '13800138000',
+        password: 'MySecretPassword123',
+        displayName: '张同学',
+        grade: 'G7',
+      }),
+    });
+    assert.equal(regRes.status, 200);
+    const regJson = await regRes.json();
+    assert.equal(regJson.user.displayName, '张同学');
+    assert.equal(regJson.user.provider, 'phone');
+    assert.equal(regJson.user.phone, '138****8000');
+    const regCookie = extractSessionCookie(regRes);
+    assert.ok(regCookie.startsWith('k12_cn_session='));
+
+    // Duplicate phone returns 409
+    const dupRes = await fetch(`${srv.baseUrl}/api/auth/phone/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '13800138000',
+        password: 'AnotherPassword123',
+      }),
+    });
+    assert.equal(dupRes.status, 409);
+
+    // Wrong password returns 401
+    const badLogin = await fetch(`${srv.baseUrl}/api/auth/phone/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '13800138000',
+        password: 'wrong-password',
+      }),
+    });
+    assert.equal(badLogin.status, 401);
+
+    // Correct password succeeds and /api/auth/me returns masked phone
+    const okLogin = await fetch(`${srv.baseUrl}/api/auth/phone/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: '13800138000',
+        password: 'MySecretPassword123',
+      }),
+    });
+    assert.equal(okLogin.status, 200);
+    const loginCookie = extractSessionCookie(okLogin);
+    assert.ok(loginCookie.startsWith('k12_cn_session='));
+
+    const meRes = await fetch(`${srv.baseUrl}/api/auth/me`, {
+      headers: { Cookie: loginCookie },
+    });
+    const meJson = await meRes.json();
+    assert.equal(meJson.user.provider, 'phone');
+    assert.equal(meJson.user.phone, '138****8000');
+    assert.equal(meJson.user.displayName, '张同学');
   } finally {
     await srv.close();
   }

@@ -52,7 +52,7 @@ export default function ActivitySyncStatus({
         <div className="flex items-start gap-2.5">
           <AlertTriangle className="w-5 h-5 text-amber-800 shrink-0 mt-0.5" aria-hidden="true" />
           <div className="text-xs sm:text-sm font-extrabold text-amber-950 leading-relaxed">
-            ⚠️ 当前未登录{isCnRegion() ? '微信' : ' Google '}账号，成绩仅暂存本机、家长看板暂不可见
+            ⚠️ 当前未登录{isCnRegion() ? '' : ' Google 账号'}，成绩仅暂存本机、家长看板暂不可见
           </div>
         </div>
         {onSignIn && (
@@ -63,7 +63,7 @@ export default function ActivitySyncStatus({
           >
             <LogIn className="w-4 h-4" aria-hidden="true" />
             {isCnRegion()
-              ? '立即微信登录并同步'
+              ? '立即登录并同步'
               : needsSSOSync
                 ? '同步 Google 登录并上传'
                 : '立即 Google 登录并同步'}
